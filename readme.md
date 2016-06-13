@@ -1,3 +1,5 @@
+# Version 2.0.0
+## Nitesh Note
 Voxbone-2.0.0.js is an API breaking release of our webrtc SDK
 
 Upgrade to voxbone-2.0.0.js works only if following conditions are met:
