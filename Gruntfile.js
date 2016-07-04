@@ -10,7 +10,7 @@ module.exports = function (grunt) {
         banner: '/*!\n' +
           ' * @license Voxbone v<%= pkg.version %>\n' +
           ' * Copyright <%= grunt.template.today("yyyy") %> Voxbone. All Rights Reserved.\n' +
-          ' * Licensed under the Apache License, Version 2.0 (the "License")\n' +
+          ' * Licensed under the Apache License, Version 2.0 (the "License") \n' +
           ' */'
       },
 
@@ -48,6 +48,20 @@ module.exports = function (grunt) {
         src: '*.js',
         dest: 'voxbone/'
       }
+    },
+    cloudfront: {
+      options: {
+        accessKeyId: '<%= aws.prod.accessKeyId %>',
+        secretAccessKey: '<%= aws.prod.secretAccessKey %>',
+        distributionId: '<%= aws.cloudfront.voxbone_distro %>'
+      },
+      voxbone: {
+        options: {
+          invalidations: [
+            '/voxbone/*.js'
+          ]
+        }
+      }
     }
   });
 
@@ -55,5 +69,6 @@ module.exports = function (grunt) {
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-uglify');
 
-  grunt.registerTask('dist-js', ['concat:voxbone', 'uglify:voxbone']);
+  grunt.registerTask('build-js', ['concat:voxbone', 'uglify:voxbone']);
+  grunt.registerTask('dist', ['s3:production', 'cloudfront:voxbone']);
 }
