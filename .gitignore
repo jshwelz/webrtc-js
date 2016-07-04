@@ -20,4 +20,5 @@ node_modules
 # excluding bower related directories
 bower_components
 
+conf/credentials.json
 .env

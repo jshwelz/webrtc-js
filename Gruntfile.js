@@ -3,6 +3,7 @@ module.exports = function (grunt) {
 
   grunt.initConfig({
     pkg: grunt.file.readJSON('package.json'),
+    aws: grunt.file.readJSON('conf/credentials.json').aws,
 
     concat: {
       options: {
@@ -35,9 +36,22 @@ module.exports = function (grunt) {
         src: '<%= concat.voxbone.dest %>',
         dest: 'dist/voxbone-<%= pkg.version %>.min.js'
       }
+    },
+    s3: {
+      production: {
+        options: {
+          accessKeyId: '<%= aws.prod.accessKeyId %>',
+          secretAccessKey: '<%= aws.prod.secretAccessKey %>',
+          bucket: 'click2vox.com'
+        },
+        cwd: 'dist/',
+        src: '*.js',
+        dest: 'voxbone/'
+      }
     }
   });
 
+  grunt.loadNpmTasks('grunt-aws');
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-uglify');
 
