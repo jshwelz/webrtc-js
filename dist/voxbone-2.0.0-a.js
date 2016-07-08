@@ -1,7 +1,7 @@
 /*!
  * @license Voxbone v2.0.0-a
  * Copyright 2016 Voxbone. All Rights Reserved.
- * Licensed under the Apache License, Version 2.0 (the "License")
+ * Licensed under the Apache License, Version 2.0 (the "License") 
  *//**
  * @preserve JsSIP v0.7.9
  * the Javascript SIP library
@@ -25495,7 +25495,7 @@ extend(voxbone, {
       request.open('POST', url);
       request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
       request.onload = function() {
-        if (typeof callback !== 'undefined') {
+        if (typeof callback === 'function') {
           callback({
             status: request.status,
             message: request.responseText

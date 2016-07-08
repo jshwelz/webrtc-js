@@ -30,7 +30,8 @@ module.exports = function (grunt) {
         preserveComments: function (node, comment) {
           if (/@(preserve|license|cc_on)/.test(comment.value))
             return true;
-        }
+        },
+        sourceMap: true
       },
       voxbone: {
         src: '<%= concat.voxbone.dest %>',
