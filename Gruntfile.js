@@ -43,10 +43,10 @@ module.exports = function (grunt) {
         options: {
           accessKeyId: '<%= aws.prod.accessKeyId %>',
           secretAccessKey: '<%= aws.prod.secretAccessKey %>',
-          bucket: 'click2vox.com'
+          bucket: 'cdn-voxbone-com'
         },
         cwd: 'dist/',
-        src: '*.js',
+        src: ['*.js', '*.map'],
         dest: 'voxbone/'
       }
     },
