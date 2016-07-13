@@ -70,6 +70,31 @@ extend(voxbone, {
   }
 });
 
+// some overrides
+JsSIP.C.SESSION_EXPIRES = 3600;
+
+// first make sure that we enable the verbose mode of JsSIP
+JsSIP.debug.enable('JsSIP:*');
+
+// then we monkey patch the debug function to buffer the log messages
+JsSIP.debug.log = function () {
+	var logger = (arguments[0].indexOf('ERROR') === -1) ? JsSIP.VoxboneLogger.loginfo : JsSIP.VoxboneLogger.logerror;
+	return logger.apply(this, arguments);
+};
+
+JsSIP.VoxboneLogger = {
+	loginfo: function () {
+		var args = Array.prototype.slice.call(arguments);
+		info.apply(console, args);
+	},
+	logerror: function () {
+		var args = Array.prototype.slice.call(arguments);
+		error.apply(console, args);
+	},
+	setError: function (fn) { error = fn; },
+	setInfo: function (fn) { info = fn; }
+};
+
 JsSIP.VoxboneLogger.setInfo(function() {
 	var args = Array.prototype.slice.call(arguments);
 	if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {

@@ -16,7 +16,7 @@ module.exports = function (grunt) {
 
       voxbone: {
         src: [
-          'src/vendor/jssip-voxbone-0.7.9.js',
+          'src/vendor/jssip-2.0.2.min.js',
           'src/vendor/socket.io-1.4.5.js',
           'src/vendor/sha-1.5.0.js',
           'src/vendor/callstats.min.js',
