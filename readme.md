@@ -1,3 +1,21 @@
+# Version 2.1.0
+## Draft update text
+
+Enhancements
+* Removed jquery dependency - better interoperability with existing sites
+* Minified file availability - speeds load times
+* Source maps - helps with debugging minified files
+* CDN file distribution - faster load times
+* SIP library updates
+* Bug fixes
+
+### File Versioning
+* use [//cdn.voxbone.com/voxbone-2.1.0.js](https://cdn.voxbone.com/voxbone-2.1.0.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone-2.1.js](https://cdn.voxbone.com/voxbone-2.1.js) to access a minor version release with the latest patches
+* use [//cdn.voxbone.com/voxbone-2.js](https://cdn.voxbone.com/voxbone-2.js) to access a major version release with the latest updates
+
+Please see [semver.org](semver.org) for details on the version numbering scheme.
+
 # Version 2.0.0
 ## Nitesh Note
 Voxbone-2.0.0.js is an API breaking release of our webrtc SDK
@@ -15,6 +33,12 @@ Config flag voxbone.WebRTC.configuration.log_level can be used to control the co
 voxbone.Logger.log_level.INFO -- Everything goes to console
 voxbone.Logger.log_level.ERROR -- Only errors are sent to console
 voxbone.Logger.log_level.NONE  -- No logs are sent to console
+
+Enhancement summary:
+* Moving to a [semver](semver.org) version numbering scheme
+* Integration of a new WebRTC call monitoring system (in addition to Voxbone's existing systems)
+* Consolidation of JavaScript files
+* Console log supression
 
 # webrtc-js (Needs update)
 
