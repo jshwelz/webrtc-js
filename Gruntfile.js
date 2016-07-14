@@ -59,7 +59,7 @@ module.exports = function (grunt) {
       voxbone: {
         options: {
           invalidations: [
-            '/voxbone/*.js'
+            '/voxbone/*'
           ]
         }
       }
