@@ -86,6 +86,177 @@ var Hashtable=function(t){function n(t){return typeof t==p?t:""+t}function e(t){
 function detectBrowserInfo(){var a,b,c=navigator.userAgent,d=navigator.appName,e=navigator.appVersion,f=""+parseFloat(navigator.appVersion),g={goog:"Chrome",moz:"Firefox",plugin:"Plugin",edge:"Edge"};-1!==(a=c.indexOf("Opera"))?(d="Opera",f=c.substring(a+6),-1!==(a=c.indexOf("Version"))&&(f=c.substring(a+8)),b=g.goog):-1!==(a=c.indexOf("OPR"))?(d="Opera",f=c.substring(a+4),-1!==(a=c.indexOf("Version"))&&(f=c.substring(a+8)),b=g.goog):-1!==(a=c.indexOf("MSIE"))?(d="Microsoft Internet Explorer",f=c.substring(a+5),b=g.goog):-1!==(a=c.indexOf("Edge"))?(d=g.edge,f=c.substring(a+5),b=g.edge):-1!==(a=c.indexOf("Chrome"))?(d=g.goog,f=c.substring(a+7),b=g.goog):-1!==(a=c.indexOf("Safari"))?(d="Safari",f=c.substring(a+7),-1!==(a=c.indexOf("Version"))&&(f=c.substring(a+8)),b=g.goog):-1!==(a=c.indexOf("Firefox"))&&(d="Firefox",f=c.substring(a+8),b=g.moz);var h,i,j=null,k=[{s:"Windows 3.11",r:/Win16/},{s:"Windows 95",r:/(Windows 95|Win95|Windows_95)/},{s:"Windows ME",r:/(Win 9x 4.90|Windows ME)/},{s:"Windows 98",r:/(Windows 98|Win98)/},{s:"Windows CE",r:/Windows CE/},{s:"Windows 2000",r:/(Windows NT 5.0|Windows 2000)/},{s:"Windows XP",r:/(Windows NT 5.1|Windows XP)/},{s:"Windows Server 2003",r:/Windows NT 5.2/},{s:"Windows Vista",r:/Windows NT 6.0/},{s:"Windows 7",r:/(Windows 7|Windows NT 6.1)/},{s:"Windows 8.1",r:/(Windows 8.1|Windows NT 6.3)/},{s:"Windows 8",r:/(Windows 8|Windows NT 6.2)/},{s:"Windows 10",r:/(Windows 10|Windows NT 10.0)/},{s:"Windows NT 4.0",r:/(Windows NT 4.0|WinNT4.0|WinNT|Windows NT)/},{s:"Windows ME",r:/Windows ME/},{s:"Android",r:/Android/},{s:"Open BSD",r:/OpenBSD/},{s:"Sun OS",r:/SunOS/},{s:"Linux",r:/(Linux|X11)/},{s:"iOS",r:/(iPhone|iPad|iPod)/},{s:"Mac OS X",r:/Mac OS X/},{s:"Mac OS",r:/(MacPPC|MacIntel|Mac_PowerPC|Macintosh)/},{s:"QNX",r:/QNX/},{s:"UNIX",r:/UNIX/},{s:"BeOS",r:/BeOS/},{s:"OS/2",r:/OS\/2/},{s:"Search Bot",r:/(nuhk|Googlebot|Yammybot|Openbot|Slurp|MSNBot|Ask Jeeves\/Teoma|ia_archiver)/}];for(h in k)if(i=k[h],i.r.test(c)){j=i.s;break}var l=null;switch(/Windows/.test(j)&&(l=/Windows (.*)/.exec(j)[1],j="Windows"),j){case"Mac OS X":l=/Mac OS X (10[\.\_\d]+)/.exec(c)[1];break;case"Android":l=/Android ([\.\_\d]+)/.exec(c)[1];break;case"iOS":l=/OS (\d+)_(\d+)_?(\d+)?/.exec(e),l=l[1]+"."+l[2]+"."+(0|l[3])}return{name:d,ver:f.toString(),os:j+" "+l,codebase:b}}
 /*! callstats.js 2016-06-28 */
 function measureAppLoadingPerformance(a){var b=0,c=Number.MAX_VALUE,d=0,e="",f="",g=window.performance;if(!("performance"in window&&"timing"in window.performance&&"navigation"in window.performance))return{support:"none",total:void 0};var h=g.timing.loadEventEnd-g.timing.navigationStart;if("Chrome"===a.name||"Opera"===a.name){var i,j=g.getEntriesByType("resource");for(i=0;i<j.length;i++)j[i].duration>d&&(f=j[i].name.substr(j[i].name.lastIndexOf("/")+1),d=j[i].duration),j[i].duration<c&&(e=j[i].name.substr(j[i].name.lastIndexOf("/")+1),c=j[i].duration),j[i].name.indexOf("CALLSTATS_SRC_URLstatic/callstats")>-1&&(b=j[i].duration);return{support:"full",callstats:b,min:{name:e,time:c},max:{name:f,time:d},total:h}}return"Firefox"===a.name?{support:"limited",total:h}:void 0}
+/**
+ * Part of this code was taken from the JsSIP source code
+ * and modified a bit to make it run as wanted
+ */
+
+var T1 = 500,
+    T2 = 4000,
+    T4 = 5000;
+
+
+var Timers = {
+    T1: T1,
+    T2: T2,
+    T4: T4,
+    TIMER_B: 64 * T1,
+    TIMER_D: 0 * T1,
+    TIMER_F: 64 * T1,
+    TIMER_H: 64 * T1,
+    TIMER_I: 0 * T1,
+    TIMER_J: 0 * T1,
+    TIMER_K: 0 * T4,
+    TIMER_L: 64 * T1,
+    TIMER_M: 64 * T1,
+    PROVISIONAL_RESPONSE_INTERVAL: 60000  // See RFC 3261 Section 13.3.1.1
+};
+
+/**
+ * Handle SessionTimers for an incoming INVITE or UPDATE.
+ * @param  {IncomingRequest} request
+ * @param  {Array} responseExtraHeaders  Extra headers for the 200 response.
+ */
+function handleSessionTimersInIncomingRequest(request, responseExtraHeaders) {
+    if (!this.sessionTimers.enabled) { return; }
+
+    var session_expires_refresher;
+
+    if (request.session_expires && request.session_expires >= JsSIP.C.MIN_SESSION_EXPIRES) {
+        this.sessionTimers.currentExpires = request.session_expires;
+        session_expires_refresher = request.session_expires_refresher || 'uas';
+    }
+    else {
+        this.sessionTimers.currentExpires = this.sessionTimers.defaultExpires;
+        session_expires_refresher = 'uas';
+    }
+
+    responseExtraHeaders.push('Session-Expires: ' + this.sessionTimers.currentExpires + ';refresher=' + session_expires_refresher);
+
+    this.sessionTimers.refresher = (session_expires_refresher === 'uas');
+    runSessionTimer.call(this);
+}
+
+/**
+ * Handle SessionTimers for an incoming response to INVITE or UPDATE.
+ * @param  {IncomingResponse} response
+ */
+function handleSessionTimersInIncomingResponse(response) {
+    if (!this.sessionTimers.enabled) { return; }
+
+    var session_expires_refresher;
+
+    if (response.session_expires && response.session_expires >= JsSIP_C.MIN_SESSION_EXPIRES) {
+        this.sessionTimers.currentExpires = response.session_expires;
+        session_expires_refresher = response.session_expires_refresher || 'uac';
+    }
+    else {
+        this.sessionTimers.currentExpires = this.sessionTimers.defaultExpires;
+        session_expires_refresher = 'uac';
+    }
+
+    this.sessionTimers.refresher = (session_expires_refresher === 'uac');
+    runSessionTimer.call(this);
+}
+
+function runSessionTimer() {
+    var self = this;
+    var expires = this.sessionTimers.currentExpires;
+
+    this.sessionTimers.running = true;
+
+    clearTimeout(this.sessionTimers.timer);
+
+    // I'm the refresher.
+    if (this.sessionTimers.refresher) {
+        this.sessionTimers.timer = setTimeout(function () {
+            if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
+
+            debug('runSessionTimer() | sending session refresh request');
+
+            sendUpdate.call(self, {
+                eventHandlers: {
+                    succeeded: function (response) {
+                        handleSessionTimersInIncomingResponse.call(self, response);
+                    }
+                }
+            });
+        }, expires * 500);  // Half the given interval (as the RFC states).
+    }
+
+    // I'm not the refresher.
+    else {
+        this.sessionTimers.timer = setTimeout(function () {
+            if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
+
+            debugerror('runSessionTimer() | timer expired, terminating the session');
+
+            self.terminate({
+                cause: JsSIP_C.causes.REQUEST_TIMEOUT,
+                status_code: 408,
+                reason_phrase: 'Session Timer Expired'
+            });
+        }, expires * 1100);
+    }
+}
+
+
+function setInvite2xxTimer(request, body) {
+    var
+        self = this,
+        timeout = Timers.T1;
+
+    this.timers.invite2xxTimer = setTimeout(function invite2xxRetransmission() {
+        if (self.status !== JsSIP.C.STATUS_WAITING_FOR_ACK) {
+            return;
+        }
+
+        request.reply(200, null, ['Contact: ' + self.contact], body);
+
+        if (timeout < Timers.T2) {
+            timeout = timeout * 2;
+            if (timeout > Timers.T2) {
+                timeout = Timers.T2;
+            }
+        }
+        self.timers.invite2xxTimer = setTimeout(
+            invite2xxRetransmission, timeout
+        );
+    }, timeout);
+}
+
+
+/**
+ * RFC3261 14.2
+ * If a UAS generates a 2xx response and never receives an ACK,
+ *  it SHOULD generate a BYE to terminate the dialog.
+ */
+function setACKTimer() {
+    var self = this;
+
+    this.timers.ackTimer = setTimeout(function () {
+        if (self.status === JsSIP.C.STATUS_WAITING_FOR_ACK) {
+            debug('no ACK received, terminating the session');
+            clearTimeout(self.timers.invite2xxTimer);
+            sendRequest.call(self, JsSIP.C.BYE);
+            ended.call(self, 'remote', null, JsSIP.C.causes.NO_ACK);
+        }
+    }, Timers.TIMER_H);
+}
+
+function ended(originator, message, cause) {
+    debug('session ended');
+
+    this.end_time = new Date();
+
+    this.close();
+    this.emit('ended', {
+        originator: originator,
+        message: message || null,
+        cause: cause
+    });
+}
+
 // extend.js
 // Written by Andrew Dupont, optimized by Addy Osmani
 function extend(destination, source) {
@@ -159,7 +330,7 @@ extend(voxbone, {
 });
 
 // some overrides
-JsSIP.C.SESSION_EXPIRES = 3600;
+// JsSIP.C.SESSION_EXPIRES = 3600;
 
 // first make sure that we enable the verbose mode of JsSIP
 JsSIP.debug.enable('JsSIP:*');
@@ -842,9 +1013,9 @@ extend(voxbone, {
 
 				/**
 				  * Stop the ice gathering process 10 seconds after we
-			          * we have atleast 1 relay candidate
-                                */
-        options.pcConfig.gatheringTimeoutAfterRelay = 5000;
+				  * we have atleast 1 relay candidate
+				*/
+				options.pcConfig.gatheringTimeoutAfterRelay = 5000;
 			}
 			options.pcConfig.iceCandidatePoolSize=10;
 
@@ -853,7 +1024,26 @@ extend(voxbone, {
 			if (this.phone == undefined) {
 				this.phone = new JsSIP.UA(this.configuration);
 				this.phone.once('connected', function() { voxbone.WebRTC.rtcSession = voxbone.WebRTC.phone.call(uri.toAor(), options);});
-				this.phone.on('newRTCSession', function(data) { data.session.on('connecting', function(e) {voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);}) });
+				this.phone.on('newRTCSession', function(data) {
+					data.session.on('connecting', function(e) {
+						voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
+					});
+
+					data.session.on('reinvite', function (info) {
+						request = info.request;
+
+						var extraHeaders = ['Contact: ' + data.session.contact];
+						handleSessionTimersInIncomingRequest.call(data.session, request, extraHeaders);
+
+						request.reply(200, null, extraHeaders, null,
+							function () {
+								self.status = JsSIP.C.STATUS_WAITING_FOR_ACK;
+								setInvite2xxTimer.call(data.session, request, null);
+								setACKTimer.call(data.session);
+							}
+						);
+					});
+				});
 				this.phone.start();
 			} else {
 				this.phone.configuration = this.configuration;
