@@ -365,7 +365,7 @@ extend(voxbone, {
 			'accepted': function (e) {
 			},
 			'getUserMediaFailed': function (e) {
-				alert("Failed to access mic/camera");
+				voxbone.Logger.logerror("Failed to access mic/camera");
 			},
 			'localMediaVolume': function (e) {
 			},

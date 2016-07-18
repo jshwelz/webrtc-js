@@ -172,8 +172,6 @@ function runSessionTimer() {
         this.sessionTimers.timer = setTimeout(function () {
             if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
 
-            debug('runSessionTimer() | sending session refresh request');
-
             sendUpdate.call(self, {
                 eventHandlers: {
                     succeeded: function (response) {
@@ -188,8 +186,6 @@ function runSessionTimer() {
     else {
         this.sessionTimers.timer = setTimeout(function () {
             if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
-
-            debugerror('runSessionTimer() | timer expired, terminating the session');
 
             self.terminate({
                 cause: JsSIP_C.causes.REQUEST_TIMEOUT,
@@ -236,7 +232,6 @@ function setACKTimer() {
 
     this.timers.ackTimer = setTimeout(function () {
         if (self.status === JsSIP.C.STATUS_WAITING_FOR_ACK) {
-            debug('no ACK received, terminating the session');
             clearTimeout(self.timers.invite2xxTimer);
             sendRequest.call(self, JsSIP.C.BYE);
             ended.call(self, 'remote', null, JsSIP.C.causes.NO_ACK);
@@ -245,8 +240,6 @@ function setACKTimer() {
 }
 
 function ended(originator, message, cause) {
-    debug('session ended');
-
     this.end_time = new Date();
 
     this.close();
@@ -330,7 +323,7 @@ extend(voxbone, {
 });
 
 // some overrides
-// JsSIP.C.SESSION_EXPIRES = 3600;
+JsSIP.C.SESSION_EXPIRES = 3600;
 
 // first make sure that we enable the verbose mode of JsSIP
 JsSIP.debug.enable('JsSIP:*');
@@ -624,7 +617,7 @@ extend(voxbone, {
 			'accepted': function (e) {
 			},
 			'getUserMediaFailed': function (e) {
-				alert("Failed to access mic/camera");
+				voxbone.Logger.logerror("Failed to access mic/camera");
 			},
 			'localMediaVolume': function (e) {
 			},
