@@ -509,10 +509,10 @@ extend(voxbone, {
 		},
 
     /**
-     * Check if the docupent contains a video element  with the provided id.
+     * Check if the document contains a video element  with the provided id.
      * If no video element exists, it created it prior to bind video stream to it
      *
-     * @param id id of the video element
+     * @param id of the video element
      * @param videoStream video stream from the WebSocket
      * @returns {HTMLElement}
      */
@@ -614,8 +614,8 @@ extend(voxbone, {
 			}
 		},
 
-		/*Clean up the webrtc object, resets any ongoing timers and other data specific to
-          the current call*/
+		// Clean up the webrtc object, resets any ongoing timers and
+		// other data specific to the current call
     cleanUp : function () {
 			if (voxbone.WebRTC.localVolumeTimer !== undefined) {
 				clearInterval(voxbone.WebRTC.localVolumeTimer);
@@ -633,10 +633,30 @@ extend(voxbone, {
 				clearTimeout(voxbone.WebRTC.dtmfTimer);
 				voxbone.WebRTC.dtmfTimer = undefined;
 			}
+			voxbone.WebRTC.cleanAudioElement(voxbone.WebRTC.audioComponentName);
 			voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
 			voxbone.WebRTC.callid = "";
 			voxbone.WebRTC.webrtcLogs = "";
 			voxbone.WebRTC.rtcSession = {};
+		},
+
+		/**
+		 * Check if the document contains an audio element with the provided id.
+		 * If audio element exists, cleans the src attr and reload it to
+		 * avoid having the sound icon enabled in some browser
+		 *
+		 * @param id of the audio element
+		 * @returns {HTMLElement}
+		 */
+		cleanAudioElement: function (id) {
+			var audio = document.getElementById(id);
+			// check if audio element really exists
+			if (audio) {
+				audio.removeAttribute('src');
+				audio.load();
+			}
+
+			return audio;
 		},
 
 		/**
