@@ -1,6 +1,6 @@
 {
   "name": "voxbone",
-  "version": "2.0.0-a",
+  "version": "2.1.0",
   "private": true,
   "engines": {
     "node": "4.2.3"

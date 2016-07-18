@@ -70,6 +70,31 @@ extend(voxbone, {
   }
 });
 
+// some overrides
+JsSIP.C.SESSION_EXPIRES = 3600;
+
+// first make sure that we enable the verbose mode of JsSIP
+JsSIP.debug.enable('JsSIP:*');
+
+// then we monkey patch the debug function to buffer the log messages
+JsSIP.debug.log = function () {
+	var logger = (arguments[0].indexOf('ERROR') === -1) ? JsSIP.VoxboneLogger.loginfo : JsSIP.VoxboneLogger.logerror;
+	return logger.apply(this, arguments);
+};
+
+JsSIP.VoxboneLogger = {
+	loginfo: function () {
+		var args = Array.prototype.slice.call(arguments);
+		info.apply(console, args);
+	},
+	logerror: function () {
+		var args = Array.prototype.slice.call(arguments);
+		error.apply(console, args);
+	},
+	setError: function (fn) { error = fn; },
+	setInfo: function (fn) { info = fn; }
+};
+
 JsSIP.VoxboneLogger.setInfo(function() {
 	var args = Array.prototype.slice.call(arguments);
 	if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {
@@ -340,7 +365,7 @@ extend(voxbone, {
 			'accepted': function (e) {
 			},
 			'getUserMediaFailed': function (e) {
-				alert("Failed to access mic/camera");
+				voxbone.Logger.logerror("Failed to access mic/camera");
 			},
 			'localMediaVolume': function (e) {
 			},
@@ -729,9 +754,9 @@ extend(voxbone, {
 
 				/**
 				  * Stop the ice gathering process 10 seconds after we
-			          * we have atleast 1 relay candidate
-                                */
-        options.pcConfig.gatheringTimeoutAfterRelay = 5000;
+				  * we have atleast 1 relay candidate
+				*/
+				options.pcConfig.gatheringTimeoutAfterRelay = 5000;
 			}
 			options.pcConfig.iceCandidatePoolSize=10;
 
@@ -740,7 +765,26 @@ extend(voxbone, {
 			if (this.phone == undefined) {
 				this.phone = new JsSIP.UA(this.configuration);
 				this.phone.once('connected', function() { voxbone.WebRTC.rtcSession = voxbone.WebRTC.phone.call(uri.toAor(), options);});
-				this.phone.on('newRTCSession', function(data) { data.session.on('connecting', function(e) {voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);}) });
+				this.phone.on('newRTCSession', function(data) {
+					data.session.on('connecting', function(e) {
+						voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
+					});
+
+					data.session.on('reinvite', function (info) {
+						request = info.request;
+
+						var extraHeaders = ['Contact: ' + data.session.contact];
+						handleSessionTimersInIncomingRequest.call(data.session, request, extraHeaders);
+
+						request.reply(200, null, extraHeaders, null,
+							function () {
+								self.status = JsSIP.C.STATUS_WAITING_FOR_ACK;
+								setInvite2xxTimer.call(data.session, request, null);
+								setACKTimer.call(data.session);
+							}
+						);
+					});
+				});
 				this.phone.start();
 			} else {
 				this.phone.configuration = this.configuration;
