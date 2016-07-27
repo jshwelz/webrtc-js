@@ -10,11 +10,11 @@ Enhancements
 * Bug fixes
 
 ### File Versioning
-* use [//cdn.voxbone.com/voxbone-2.1.0.js](https://cdn.voxbone.com/voxbone-2.1.0.js) to access a specific patch release
-* use [//cdn.voxbone.com/voxbone-2.1.js](https://cdn.voxbone.com/voxbone-2.1.js) to access a minor version release with the latest patches
-* use [//cdn.voxbone.com/voxbone-2.js](https://cdn.voxbone.com/voxbone-2.js) to access a major version release with the latest updates
+* use [//cdn.voxbone.com/voxbone/voxbone-2.1.0.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.0.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-2.1.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.js) to access a minor version release with the latest patches
+* use [//cdn.voxbone.com/voxbone/voxbone-2.js](https://cdn.voxbone.com/voxbone/voxbone-2.js) to access a major version release with the latest updates
 
-Please see [semver.org](semver.org) for details on the version numbering scheme.
+Please see [semver.org](http://semver.org) for details on the version numbering scheme.
 
 # Version 2.0.0
 ## Nitesh Note
@@ -88,7 +88,7 @@ An authentication token needs to be provided for initializing the voxbone.WebRTC
 * username: This is your credentials username
 * expires: expiration date of the generated key (in seconds, epoch time)
 * key: this is a base64 representation of an HMAC SHA1 of expires:username, salted with your password.
- 
+
 Various example on how to generate the authentication token can be found on Github such like
 
 * [webrtc-auth-servlet](https://github.com/voxbone/webrtc-auth-servlet) (java)
@@ -172,17 +172,17 @@ voxbone.WebRTC.sendDTMF(1);
 DTMF String sending can also be automated to bypass IVRs. In some cases,  it is desirable for web application to enabled automated IVR traversal. For automated IVR traversal, web application needs to configure the dialer_string, digits configured in the dialer string will be sent automatically to the remote party after the call is established. Dialer string is comma separated, to define a specific pause between digits. We add another entry like 1,700ms,2, this will add a 700ms of pause between digits 1 & 2. Example = '1,2,3,1200ms,4,5,900ms,6,#'
 
 ```javascript
-voxbone.WebRTC.configuration.dialer_string = "1,300ms,4,5,2000ms,6,#";                                                 
+voxbone.WebRTC.configuration.dialer_string = "1,300ms,4,5,2000ms,6,#";
 ```
 Overall digit pause period can be configured with digit_gap. By default, this value is 500ms.
 ```javascript
-voxbone.WebRTC.configuration.digit_gap = 1400; 
+voxbone.WebRTC.configuration.digit_gap = 1400;
 ```
 It defines the gap between digits sent by the web application. By default, this value is 500ms.
 
 Digit duration can also be configured. Digti duration defines the duration of digits sent by the web application. By default, digit duration is 100 ms.
 ```javascript
-voxbone.WebRTC.configuration.digit_duration = 1000; 
+voxbone.WebRTC.configuration.digit_duration = 1000;
 ```
 
 ####isCallOpen####
@@ -196,42 +196,42 @@ Voxbone.js provides many callback APIs allowing the web application to monitor t
 ####Progress####
 This callback API indicates the called party phone is ringing now. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.progress = function(e) { 
+voxbone.WebRTC.customEventHandler.progress = function(e) {
     console.error(“call in progress”);
 }
 ```
 ####Failed####
 This callback API indicates that webRTC sdk failed to establish the call. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.failed = function(e) { 
+voxbone.WebRTC.customEventHandler.failed = function(e) {
   console.error(“Failed to establish the call”);
 }
 ```
 ####getUserMediaFailed####
 This API is used to indicate that getUserMedia failed which can be a result of browser not being able to access the mic. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.getUserMediaFailed = function(e) { 
+voxbone.WebRTC.customEventHandler.getUserMediaFailed = function(e) {
   console.error(“Failed to access mic”);
 }
 ```
 ####Accepted####
 This API is used to indicate that call is successfully established. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.accepted = function(e) { 
+voxbone.WebRTC.customEventHandler.accepted = function(e) {
   console.log(“call started”);
 }
 ```
 ####Ended####
 This API is used to indicate that outgoing call just ended. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.ended = function(e) { 
+voxbone.WebRTC.customEventHandler.ended = function(e) {
   console.log(“call ended”);
 }
 ```
 ####localMediaVolume####
 This is a callback API to indicate the loudness of the speech at the calling party. Here is a sample implementation of this API:
 ```javascript
-voxbone.WebRTC.customEventHandler.localMediaVolume = function(e) { 
+voxbone.WebRTC.customEventHandler.localMediaVolume = function(e) {
   console.log(“Local volume is ”+e.localVolume);
 }
 ```
@@ -253,5 +253,5 @@ This configuration option if enabled allows voxbone webrtc sdk to push all the c
 /**
 *  Set this option to true to allow voxbone to collect call logs
 */
-voxbone.WebRTC.configuration.post_logs = true; 
+voxbone.WebRTC.configuration.post_logs = true;
 ```
