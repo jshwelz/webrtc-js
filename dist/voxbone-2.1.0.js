@@ -868,7 +868,7 @@ extend(voxbone, {
 
 		// Clean up the webrtc object, resets any ongoing timers and
 		// other data specific to the current call
-    cleanUp : function () {
+    cleanUp: function () {
 			if (voxbone.WebRTC.localVolumeTimer !== undefined) {
 				clearInterval(voxbone.WebRTC.localVolumeTimer);
 				voxbone.WebRTC.localVolumeTimer = undefined;
@@ -890,6 +890,7 @@ extend(voxbone, {
 			voxbone.WebRTC.callid = "";
 			voxbone.WebRTC.webrtcLogs = "";
 			voxbone.WebRTC.rtcSession = {};
+			delete voxbone.WebRTC.phone;
 		},
 
 		/**
@@ -1082,7 +1083,7 @@ extend(voxbone, {
 
 
 			options.extraHeaders = headers;
-			if (this.phone == undefined) {
+			if (this.phone === undefined) {
 				this.phone = new JsSIP.UA(this.configuration);
 				this.phone.once('connected', function() { voxbone.WebRTC.rtcSession = voxbone.WebRTC.phone.call(uri.toAor(), options);});
 				this.phone.on('newRTCSession', function(data) {
