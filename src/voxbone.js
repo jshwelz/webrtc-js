@@ -735,7 +735,7 @@ extend(voxbone, {
 
 						voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
 
-						if (voxbone.WebRTC.rtcSession.connection !== undefined)
+						if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined')
 							pcObject = voxbone.WebRTC.rtcSession.connection.pc;
 
 						switch(e.cause) {
