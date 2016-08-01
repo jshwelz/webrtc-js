@@ -34883,6 +34883,20 @@ extend(voxbone, {
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
 								break;
 
+							case JsSIP.C.causes.BYE:
+							case JsSIP.C.causes.CANCELED:
+							case JsSIP.C.causes.NO_ANSWER:
+							case JsSIP.C.causes.EXPIRES:
+							case JsSIP.C.causes.NO_ACK:
+							case JsSIP.C.causes.BUSY:
+							case JsSIP.C.causes.REJECTED:
+							case JsSIP.C.causes.REDIRECTED:
+							case JsSIP.C.causes.UNAVAILABLE:
+							case JsSIP.C.causes.NOT_FOUND:
+								if (pcObject)
+									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
+								break;
+
 							case JsSIP.C.causes.DIALOG_ERROR:
 							case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
 							case JsSIP.C.causes.RTP_TIMEOUT:
@@ -34895,21 +34909,6 @@ extend(voxbone, {
 							default:
 								if (pcObject)
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
-								break;
-
-							case JsSIP.C.causes.BYE:
-							case JsSIP.C.causes.CANCELED:
-							case JsSIP.C.causes.NO_ANSWER:
-							case JsSIP.C.causes.EXPIRES:
-							case JsSIP.C.causes.NO_ACK:
-							case JsSIP.C.causes.BUSY:
-							case JsSIP.C.causes.REJECTED:
-							case JsSIP.C.causes.REDIRECTED:
-							case JsSIP.C.causes.UNAVAILABLE:
-							case JsSIP.C.causes.NOT_FOUND:
-								// We consider NOT to report these "errors"
-								// if (pcObject)
-								// 	callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
 								break;
 						}
 
