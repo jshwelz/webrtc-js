@@ -34872,14 +34872,14 @@ extend(voxbone, {
 
 						switch(e.cause) {
 							case JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS:
-								if (pcObject)
+								if (typeof pcObject === 'object')
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.getUserMedia);
 								voxbone.WebRTC.customEventHandler.getUserMediaFailed(e);
 								break;
 
 							case JsSIP.C.causes.INCOMPATIBLE_SDP:
 							case JsSIP.C.causes.MISSING_SDP:
-								if (pcObject)
+								if (typeof pcObject === 'object')
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
 								break;
 
@@ -34893,7 +34893,7 @@ extend(voxbone, {
 							case JsSIP.C.causes.REDIRECTED:
 							case JsSIP.C.causes.UNAVAILABLE:
 							case JsSIP.C.causes.NOT_FOUND:
-								if (pcObject)
+								if (typeof pcObject === 'object')
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
 								break;
 
@@ -34907,7 +34907,7 @@ extend(voxbone, {
 							case JsSIP.C.causes.ADDRESS_INCOMPLETE:
 							case JsSIP.C.causes.AUTHENTICATION_ERROR:
 							default:
-								if (pcObject)
+								if (typeof pcObject === 'object')
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
 								break;
 						}
