@@ -12,7 +12,7 @@
 ## 2.0.0 - June 2016
 * Moving to a [semver](semver.org) version numbering scheme
 * Integration of a new WebRTC call monitoring system (in addition to Voxbone's existing systems)
-* Bundling of our [jssjip.js fork](https://github.com/voxbone/JsSIP)
+* Bundling of our [jssip.js fork](https://github.com/voxbone/JsSIP)
 * Console log supression
 
 ------------------
