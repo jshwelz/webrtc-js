@@ -1,65 +1,67 @@
-# Version 2.1.0
-## Draft update text
+# Introduction
+webrtc-js is a Voxbone project that allows web users to call a SIP address or Voxbone SIP Trunk from WebRTC-enabled browsers. The library is focused on click-to-call use cases. See below is information on how this library works. More information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
 
-Enhancements
-* Removed jquery dependency - better interoperability with existing sites
-* Minified file availability - speeds load times
-* Source maps - helps with debugging minified files
-* CDN file distribution - faster load times
-* SIP library updates
-* Bug fixes
+### Key features
 
-### File Versioning
+* Wraps the WebRTC API for WebRTC-to-SIP dialing withi Voxbone's WebRTC Gateway service
+* Automatic detection of the nearest POP (Point Of Presence)
+* Send a DTMF string at the start of a call for IVR navigation
+* Context header which can then be passed onto customer equipment via an invite header ( X-Voxbone-Context )
+* Ephemeral authentication support
+
+### Reference implementations
+
+Voxbone provides the following reference implementations built on top of webrtc-js:
+
+* [Click2Call Demo](https://developers.voxbone.com/webrtc-editor/) - view and edit the demo code 
+* [click2vox.com](https://click2vox.com) - create a free click-to-call button with widget code for any SIP URI
+* Voxbone Customer Portal [widget generator](https://developers.voxbone.com/how-to/setup-webrtc/) - create a click-to-call button & pop-up dialer for any Voxbone DID
+
+See our [changelog](https://github.com/voxbone-workshop/webrtc-js/blob/master/CHANGELOG.md) for version differences.
+
+### Security controls
+
+Calls to webrtc-js are governed by Voxbone's WebRTC to SIP Gateway Service. These controls include:
+
+* Default limiting of no more than 8 requests per second per source IP for WebRTC calls
+* Maximum simultaneous calls is determined based on the assigned DID's channel configuration
+* An Ingress SBC that regulates incoming WebRTC gateway traffic
+* Voxbone's existing egress SBC and security mechanisms used to protect all traffic
+* Authentication timeout period set to 15 minutes
+
+Please [contact us](mailto:workshop@voxbone.com) for details.
+
+## Questions
+
+Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit an issue, or visit [voxbone.com](https://www.voxbone.com).
+
+# File references
+Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
+
 * use [//cdn.voxbone.com/voxbone/voxbone-2.1.0.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.0.js) to access a specific patch release
 * use [//cdn.voxbone.com/voxbone/voxbone-2.1.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.js) to access a minor version release with the latest patches
 * use [//cdn.voxbone.com/voxbone/voxbone-2.js](https://cdn.voxbone.com/voxbone/voxbone-2.js) to access a major version release with the latest updates
 
+Source maps are included with the minified files for simplified debugging.
+
 Please see [semver.org](http://semver.org) for details on the version numbering scheme.
 
-# Version 2.0.0
-## Nitesh Note
-Voxbone-2.0.0.js is an API breaking release of our webrtc SDK
-
-Upgrade to voxbone-2.0.0.js works only if following conditions are met:
-
-1. jssip.js isn't included seperately.
-2. Following javascript files are included (callstats has a dependency on them)
-
-https://cdn.socket.io/socket.io-1.4.5.js
-https://cdnjs.cloudflare.com/ajax/libs/jsSHA/1.5.0/sha.js
-
-Additionally, voxbone-2.0.0.js provides an extra option to suppress console logs.
-Config flag voxbone.WebRTC.configuration.log_level can be used to control the console logging, it can have following values:
-voxbone.Logger.log_level.INFO -- Everything goes to console
-voxbone.Logger.log_level.ERROR -- Only errors are sent to console
-voxbone.Logger.log_level.NONE  -- No logs are sent to console
-
-Enhancement summary:
-* Moving to a [semver](semver.org) version numbering scheme
-* Integration of a new WebRTC call monitoring system (in addition to Voxbone's existing systems)
-* Consolidation of JavaScript files
-* Console log supression
-
-# webrtc-js (Needs update)
-
-## Introduction
-webrtc-js is a Voxbone project which aims at providing an easy way for customers to make their DID numbers reachable from WebRTC-enabled browsers. Below is information on how this library works, more information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
-
-It act as a wrapper around [JsSIP](https://github.com/versatica/JsSIP) and provide some extra functionalities such like:
-
-* Ephemeral authentication support
-* Automatic detection of the nearest POP (Point Of Presence)
-* Context header which can then be passed onto customer equipment via an invite header ( X-Voxbone-Context )
+# Usage
 
 ## Basic usage
 
+Before you start, your Voxbone account must be [configured](https://developers.voxbone.com/how-to/setup-webrtc/) for WebRTC.
+
 ```javascript
-//Create an authentication token
+//Authenticate via basic auth using credentials from Voxbone's Customer Portal
+voxbone.WebRTC.basicAuthInit(username, key);
+
+//Alternatively, host your own auth server and create an authentication token
 var voxrtc_config = {"key":"ABwxcFX6ayVxu/uNuZu3eBsjrFeg=","expires":1426067127,"username":"a_username"};
+
 //Initialize Voxbone WebRTC connection
 voxbone.WebRTC.init(voxrtc_config);
-//Or authenticate via basic auth
-voxbone.WebRTC.basicAuthInit(username, key);
+
 //Place a call on a given number
 var e164 = 'a_number';
 voxbone.WebRTC.call(e164);
@@ -67,7 +69,9 @@ voxbone.WebRTC.call(e164);
 
 
 ## Authentication token
-You can decide whether to authenticate via basi auth or use token generators.
+You can decide whether to authenticate via basic auth or use token generators:
+* Basic Auth - allows any anyone to call a given e164 up to your configured trunk limit within Voxbone's border controls. Recommended in most cases where you are ok with anyone dialing a DID, such as those already listed publicly on.
+* Advanved Auth - you must host an auth server and provide a temporary auth token for greater access control. For more advanced users where you do not want to allow anyone to call the specific DID from WebRTC.
 
 #### Using Basic Auth
 Provide your username and webrtc key in the basicAuthInit() function.
@@ -149,6 +153,8 @@ voxbone.WebRTC.audioComponentName = "peer-audio";
 voxbone.WebRTC.videoComponentName = "peer-video";
 ```
 
+Note: WebRTC to SIP-controller video calling is experimental.
+
 ####Muting####
 
 Audio stream can be muted/unmuted as shown below
@@ -169,7 +175,7 @@ DTMF can be sent once the call is established using
 voxbone.WebRTC.sendDTMF(1);
 ```
 
-DTMF String sending can also be automated to bypass IVRs. In some cases,  it is desirable for web application to enabled automated IVR traversal. For automated IVR traversal, web application needs to configure the dialer_string, digits configured in the dialer string will be sent automatically to the remote party after the call is established. Dialer string is comma separated, to define a specific pause between digits. We add another entry like 1,700ms,2, this will add a 700ms of pause between digits 1 & 2. Example = '1,2,3,1200ms,4,5,900ms,6,#'
+DTMF String sending can also be automated to bypass IVRs. In some cases,  it is desirable for web application to enabled automated IVR traversal. For automated IVR traversal, web application needs to configure the dialer_string, digits configured in the dialer string will be sent automatically to the remote party after the call is established. Dialer string is comma separated, to define a specific pause between digits. We add another entry like 1,700ms,2, this will add a 700ms of pause between digits 1 & 2. Example: `1,2,3,1200ms,4,5,900ms,6,#`
 
 ```javascript
 voxbone.WebRTC.configuration.dialer_string = "1,300ms,4,5,2000ms,6,#";
@@ -247,7 +253,18 @@ In order to test if the web browser do support WebRTC, we added a conveniant met
 ```javascript
 var supported = voxbone.WebRTC.isWebRTCSupported();
 ```
-##Post logs to Voxbone Server with post_logs##
+
+## Log options
+
+### Suppress console log messages
+
+Config flag voxbone.WebRTC.configuration.log_level can be set at various levels to limit what is displayed to the javascript console:
+
+- `voxbone.Logger.log_level.INFO` -- Everything goes to console (default)
+- `voxbone.Logger.log_level.ERROR` -- Only errors are sent to console
+- `voxbone.Logger.log_level.NONE`  -- No logs are sent to console
+
+### Post logs to Voxbone Server with post_logs##
 This configuration option if enabled allows voxbone webrtc sdk to push all the call logs to a voxbone defined backend, where they can be used for troubleshooting. By default, this option is disabled.
 ```javascript
 /**
