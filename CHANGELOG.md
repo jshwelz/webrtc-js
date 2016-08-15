@@ -15,8 +15,9 @@
 * Bundling of our [jssjip.js fork](https://github.com/voxbone/JsSIP)
 * Console log supression
 
+------------------
 
-## November 2015
+## 0.0.5 - November 2015
 
 * Basic Authentication option (seperate auth server now optional)
 * isCallOpen function to detect current calls tate
@@ -30,6 +31,6 @@
 More details here: https://groups.google.com/forum/#!topic/voxbonedevelopers/etFwIMjUBV8
 
 
-## September 2015
+## 0.0.4 - September 2015
 
 See details here: https://groups.google.com/forum/#!topic/voxbonedevelopers/N73cVpQQeoM
