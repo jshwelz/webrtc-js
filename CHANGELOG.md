@@ -2,7 +2,7 @@
 
 
 ## 2.1.0 - August 2016
-* Removed jQuery dependency to minimize dependencies and provide better interoperability with existing sites
+* Removed jQuery dependency to minimize conflicts and provide better interoperability with existing sites
 * Minified file availability - speeds load times
 * Source maps - helps with debugging minified files
 * CDN file distribution - faster load times
