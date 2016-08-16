@@ -38,11 +38,11 @@ Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit
 # File references
 Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
 
-* use [//cdn.voxbone.com/voxbone/voxbone-2.1.0.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.0.js) to access a specific patch release
-* use [//cdn.voxbone.com/voxbone/voxbone-2.1.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.js) to access a minor version release with the latest patches
-* use [//cdn.voxbone.com/voxbone/voxbone-2.js](https://cdn.voxbone.com/voxbone/voxbone-2.js) to access a major version release with the latest updates
+* use [//cdn.voxbone.com/voxbone/voxbone-2.1.0.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.0.min.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-2.1.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.1.min.js) to access a minor version release with the latest patches
+* use [//cdn.voxbone.com/voxbone/voxbone-2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.min.js) to access a major version release with the latest updates
 
-Source maps are included with the minified files for simplified debugging.
+Source maps are included with the minified files for simplified debugging. Remove the _min_ from the file names above for the unminified versions.
 
 Please see [semver.org](http://semver.org) for details on the version numbering scheme.
 
