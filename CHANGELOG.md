@@ -13,7 +13,7 @@
 * Moving to a [semver](semver.org) version numbering scheme
 * Integration of a new WebRTC call monitoring system (in addition to Voxbone's existing systems)
 * Bundling of our [jssip.js fork](https://github.com/voxbone/JsSIP)
-* Console log supression
+* Console log suppression
 
 ------------------
 
