@@ -1,6 +1,8 @@
 # Introduction
 webrtc-js is a Voxbone project that allows web users to call a SIP address or Voxbone SIP Trunk from WebRTC-enabled browsers. The library is focused on click-to-call use cases. See below is information on how this library works. More information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
 
+See our [changelog](https://github.com/voxbone-workshop/webrtc-js/blob/master/CHANGELOG.md) for version differences.
+
 ### Key features
 
 * Wraps the WebRTC API for WebRTC-to-SIP dialing withi Voxbone's WebRTC Gateway service
@@ -16,8 +18,6 @@ Voxbone provides the following reference implementations built on top of webrtc-
 * [Click2Call Demo](https://developers.voxbone.com/webrtc-editor/) - view and edit the demo code 
 * [click2vox.com](https://click2vox.com) - create a free click-to-call button with widget code for any SIP URI
 * Voxbone Customer Portal [widget generator](https://developers.voxbone.com/how-to/setup-webrtc/) - create a click-to-call button & pop-up dialer for any Voxbone DID
-
-See our [changelog](https://github.com/voxbone-workshop/webrtc-js/blob/master/CHANGELOG.md) for version differences.
 
 ### Security controls
 
