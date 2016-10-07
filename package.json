@@ -9,6 +9,7 @@
     "grunt": "^1.0.1",
     "grunt-aws": "^0.6.2",
     "grunt-contrib-concat": "^1.0.1",
+    "grunt-contrib-jshint": "^1.0.0",
     "grunt-contrib-uglify": "^1.0.1",
     "jit-grunt": "^0.10.0"
   }
