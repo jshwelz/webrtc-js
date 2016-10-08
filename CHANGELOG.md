@@ -1,5 +1,7 @@
 # Change Log
 
+## 2.1.1 - November 2016
+* Updates Callstats JS library
 
 ## 2.1.0 - August 2016
 * Removed jQuery dependency to minimize conflicts and provide better interoperability with existing sites
