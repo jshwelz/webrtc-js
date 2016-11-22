@@ -1,9 +1,9 @@
 /*!
- * @license Voxbone v2.1.1
+ * @license Voxbone v2.1.2
  * Copyright 2016 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//**
- * @license JsSIP v2.0.2
+ * @license JsSIP v2.0.6
  * the Javascript SIP library
  * Copyright: 2012-2016 José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)
  * Homepage: http://jssip.net
@@ -166,7 +166,7 @@ var C = {
 
 module.exports = C;
 
-},{"../package.json":47}],2:[function(require,module,exports){
+},{"../package.json":40}],2:[function(require,module,exports){
 module.exports = Dialog;
 
 
@@ -12994,7 +12994,7 @@ Object.defineProperties(JsSIP, {
   }
 });
 
-},{"../package.json":47,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":23,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"debug":33,"rtcninja":38}],8:[function(require,module,exports){
+},{"../package.json":40,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":23,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"debug":33,"rtcninja":43}],8:[function(require,module,exports){
 module.exports = Message;
 
 
@@ -16463,7 +16463,7 @@ function onunmute(options) {
   });
 }
 
-},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":20,"./Transactions":21,"./Utils":25,"debug":33,"events":28,"rtcninja":38,"sdp-transform":44,"util":32}],12:[function(require,module,exports){
+},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":20,"./Transactions":21,"./Utils":25,"debug":33,"events":28,"rtcninja":43,"sdp-transform":37,"util":32}],12:[function(require,module,exports){
 module.exports = DTMF;
 
 
@@ -17381,7 +17381,7 @@ RequestSender.prototype = {
           cseq = this.request.cseq + 1;
         }
 
-        this.request = this.request.clone();
+        this.request = this.applicant.request = this.request.clone();
 
         this.request.cseq = cseq;
         this.request.setHeader('cseq', cseq +' '+ this.method);
@@ -18023,7 +18023,7 @@ function IncomingResponse() {
 
 IncomingResponse.prototype = new IncomingMessage();
 
-},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":25,"debug":33,"sdp-transform":44}],19:[function(require,module,exports){
+},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":25,"debug":33,"sdp-transform":37}],19:[function(require,module,exports){
 module.exports = Socket;
 
 /**
@@ -18052,10 +18052,16 @@ module.exports = Socket;
 var Utils = require('./Utils');
 var Grammar = require('./Grammar');
 var debugerror = require('debug')('JsSIP:ERROR:Socket');
+debugerror.log = console.warn.bind(console);
 
 function Socket() {}
 
 Socket.isSocket = function(socket) {
+  // Ignore if an array is given
+  if (Array.isArray(socket)) {
+    return false;
+  }
+
   if (typeof socket === 'undefined') {
     debugerror('undefined JsSIP.Socket instance');
     return false;
@@ -19160,6 +19166,8 @@ var sanityCheck = require('./sanityCheck');
  * @throws {TypeError} If no configuration is given.
  */
 function UA(configuration) {
+  debug('new() [configuration:%o]', configuration);
+
   this.cache = {
     credentials: {}
   };
@@ -20377,7 +20385,7 @@ function onTransportData(data) {
  }
 }
 
-},{"./Constants":1,"./Exceptions":5,"./Grammar":6,"./Message":8,"./Parser":10,"./RTCSession":11,"./Registrator":16,"./SIPMessage":18,"./Socket":19,"./Transactions":21,"./Transport":22,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"./sanityCheck":27,"debug":33,"events":28,"rtcninja":38,"util":32}],24:[function(require,module,exports){
+},{"./Constants":1,"./Exceptions":5,"./Grammar":6,"./Message":8,"./Parser":10,"./RTCSession":11,"./Registrator":16,"./SIPMessage":18,"./Socket":19,"./Transactions":21,"./Transport":22,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"./sanityCheck":27,"debug":33,"events":28,"rtcninja":43,"util":32}],24:[function(require,module,exports){
 module.exports = URI;
 
 
@@ -21013,9 +21021,10 @@ module.exports = WebSocketInterface;
 var Grammar = require('./Grammar');
 var debug = require('debug')('JsSIP:WebSocketInterface');
 var debugerror = require('debug')('JsSIP:ERROR:WebSocketInterface');
+debugerror.log = console.warn.bind(console);
 
 function WebSocketInterface(url) {
-  debug('new()');
+  debug('new() [url:"%s"]', url);
 
   var sip_uri = null;
   var via_transport = null;
@@ -21427,8 +21436,12 @@ EventEmitter.prototype.emit = function(type) {
       er = arguments[1];
       if (er instanceof Error) {
         throw er; // Unhandled 'error' event
+      } else {
+        // At least give some kind of context to the user
+        var err = new Error('Uncaught, unspecified "error" event. (' + er + ')');
+        err.context = er;
+        throw err;
       }
-      throw TypeError('Uncaught, unspecified "error" event.');
     }
   }
 
@@ -21668,33 +21681,7 @@ function isUndefined(arg) {
 }
 
 },{}],29:[function(require,module,exports){
-if (typeof Object.create === 'function') {
-  // implementation from standard node.js 'util' module
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-  };
-} else {
-  // old school shim for old browsers
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    var TempCtor = function () {}
-    TempCtor.prototype = superCtor.prototype
-    ctor.prototype = new TempCtor()
-    ctor.prototype.constructor = ctor
-  }
-}
-
-},{}],30:[function(require,module,exports){
 // shim for using process in browser
-
 var process = module.exports = {};
 
 // cached from whatever global is present so that test runners that stub it
@@ -21705,22 +21692,84 @@ var process = module.exports = {};
 var cachedSetTimeout;
 var cachedClearTimeout;
 
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
 (function () {
-  try {
-    cachedSetTimeout = setTimeout;
-  } catch (e) {
-    cachedSetTimeout = function () {
-      throw new Error('setTimeout is not defined');
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
+        } else {
+            cachedSetTimeout = defaultSetTimout;
+        }
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
     }
-  }
-  try {
-    cachedClearTimeout = clearTimeout;
-  } catch (e) {
-    cachedClearTimeout = function () {
-      throw new Error('clearTimeout is not defined');
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
+        } else {
+            cachedClearTimeout = defaultClearTimeout;
+        }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
     }
-  }
 } ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
 var queue = [];
 var draining = false;
 var currentQueue;
@@ -21745,7 +21794,7 @@ function drainQueue() {
     if (draining) {
         return;
     }
-    var timeout = cachedSetTimeout(cleanUpNextTick);
+    var timeout = runTimeout(cleanUpNextTick);
     draining = true;
 
     var len = queue.length;
@@ -21762,7 +21811,7 @@ function drainQueue() {
     }
     currentQueue = null;
     draining = false;
-    cachedClearTimeout(timeout);
+    runClearTimeout(timeout);
 }
 
 process.nextTick = function (fun) {
@@ -21774,7 +21823,7 @@ process.nextTick = function (fun) {
     }
     queue.push(new Item(fun, args));
     if (queue.length === 1 && !draining) {
-        cachedSetTimeout(drainQueue, 0);
+        runTimeout(drainQueue);
     }
 };
 
@@ -21812,6 +21861,31 @@ process.chdir = function (dir) {
     throw new Error('process.chdir is not supported');
 };
 process.umask = function() { return 0; };
+
+},{}],30:[function(require,module,exports){
+if (typeof Object.create === 'function') {
+  // implementation from standard node.js 'util' module
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+} else {
+  // old school shim for old browsers
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    var TempCtor = function () {}
+    TempCtor.prototype = superCtor.prototype
+    ctor.prototype = new TempCtor()
+    ctor.prototype.constructor = ctor
+  }
+}
 
 },{}],31:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
@@ -22410,7 +22484,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":31,"_process":30,"inherits":29}],33:[function(require,module,exports){
+},{"./support/isBuffer":31,"_process":29,"inherits":30}],33:[function(require,module,exports){
 
 /**
  * This is the web browser implementation of `debug()`.
@@ -22907,6 +22981,551 @@ function plural(ms, n, name) {
 }
 
 },{}],36:[function(require,module,exports){
+var grammar = module.exports = {
+  v: [{
+      name: 'version',
+      reg: /^(\d*)$/
+  }],
+  o: [{ //o=- 20518 0 IN IP4 203.0.113.1
+    // NB: sessionId will be a String in most cases because it is huge
+    name: 'origin',
+    reg: /^(\S*) (\d*) (\d*) (\S*) IP(\d) (\S*)/,
+    names: ['username', 'sessionId', 'sessionVersion', 'netType', 'ipVer', 'address'],
+    format: "%s %s %d %s IP%d %s"
+  }],
+  // default parsing of these only (though some of these feel outdated)
+  s: [{ name: 'name' }],
+  i: [{ name: 'description' }],
+  u: [{ name: 'uri' }],
+  e: [{ name: 'email' }],
+  p: [{ name: 'phone' }],
+  z: [{ name: 'timezones' }], // TODO: this one can actually be parsed properly..
+  r: [{ name: 'repeats' }],   // TODO: this one can also be parsed properly
+  //k: [{}], // outdated thing ignored
+  t: [{ //t=0 0
+    name: 'timing',
+    reg: /^(\d*) (\d*)/,
+    names: ['start', 'stop'],
+    format: "%d %d"
+  }],
+  c: [{ //c=IN IP4 10.47.197.26
+      name: 'connection',
+      reg: /^IN IP(\d) (\S*)/,
+      names: ['version', 'ip'],
+      format: "IN IP%d %s"
+  }],
+  b: [{ //b=AS:4000
+      push: 'bandwidth',
+      reg: /^(TIAS|AS|CT|RR|RS):(\d*)/,
+      names: ['type', 'limit'],
+      format: "%s:%s"
+  }],
+  m: [{ //m=video 51744 RTP/AVP 126 97 98 34 31
+      // NB: special - pushes to session
+      // TODO: rtp/fmtp should be filtered by the payloads found here?
+      reg: /^(\w*) (\d*) ([\w\/]*)(?: (.*))?/,
+      names: ['type', 'port', 'protocol', 'payloads'],
+      format: "%s %d %s %s"
+  }],
+  a: [
+    { //a=rtpmap:110 opus/48000/2
+      push: 'rtp',
+      reg: /^rtpmap:(\d*) ([\w\-\.]*)(?:\s*\/(\d*)(?:\s*\/(\S*))?)?/,
+      names: ['payload', 'codec', 'rate', 'encoding'],
+      format: function (o) {
+        return (o.encoding) ?
+          "rtpmap:%d %s/%s/%s":
+          o.rate ?
+          "rtpmap:%d %s/%s":
+          "rtpmap:%d %s";
+      }
+    },
+    {
+      //a=fmtp:108 profile-level-id=24;object=23;bitrate=64000
+      //a=fmtp:111 minptime=10; useinbandfec=1
+      push: 'fmtp',
+      reg: /^fmtp:(\d*) ([\S| ]*)/,
+      names: ['payload', 'config'],
+      format: "fmtp:%d %s"
+    },
+    { //a=control:streamid=0
+        name: 'control',
+        reg: /^control:(.*)/,
+        format: "control:%s"
+    },
+    { //a=rtcp:65179 IN IP4 193.84.77.194
+      name: 'rtcp',
+      reg: /^rtcp:(\d*)(?: (\S*) IP(\d) (\S*))?/,
+      names: ['port', 'netType', 'ipVer', 'address'],
+      format: function (o) {
+        return (o.address != null) ?
+          "rtcp:%d %s IP%d %s":
+          "rtcp:%d";
+      }
+    },
+    { //a=rtcp-fb:98 trr-int 100
+      push: 'rtcpFbTrrInt',
+      reg: /^rtcp-fb:(\*|\d*) trr-int (\d*)/,
+      names: ['payload', 'value'],
+      format: "rtcp-fb:%d trr-int %d"
+    },
+    { //a=rtcp-fb:98 nack rpsi
+      push: 'rtcpFb',
+      reg: /^rtcp-fb:(\*|\d*) ([\w-_]*)(?: ([\w-_]*))?/,
+      names: ['payload', 'type', 'subtype'],
+      format: function (o) {
+        return (o.subtype != null) ?
+          "rtcp-fb:%s %s %s":
+          "rtcp-fb:%s %s";
+      }
+    },
+    { //a=extmap:2 urn:ietf:params:rtp-hdrext:toffset
+      //a=extmap:1/recvonly URI-gps-string
+      push: 'ext',
+      reg: /^extmap:([\w_\/]*) (\S*)(?: (\S*))?/,
+      names: ['value', 'uri', 'config'], // value may include "/direction" suffix
+      format: function (o) {
+        return (o.config != null) ?
+          "extmap:%s %s %s":
+          "extmap:%s %s";
+      }
+    },
+    {
+      //a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:PS1uQCVeeCFCanVmcjkpPywjNWhcYD0mXXtxaVBR|2^20|1:32
+      push: 'crypto',
+      reg: /^crypto:(\d*) ([\w_]*) (\S*)(?: (\S*))?/,
+      names: ['id', 'suite', 'config', 'sessionConfig'],
+      format: function (o) {
+        return (o.sessionConfig != null) ?
+          "crypto:%d %s %s %s":
+          "crypto:%d %s %s";
+      }
+    },
+    { //a=setup:actpass
+      name: 'setup',
+      reg: /^setup:(\w*)/,
+      format: "setup:%s"
+    },
+    { //a=mid:1
+      name: 'mid',
+      reg: /^mid:([^\s]*)/,
+      format: "mid:%s"
+    },
+    { //a=msid:0c8b064d-d807-43b4-b434-f92a889d8587 98178685-d409-46e0-8e16-7ef0db0db64a
+      name: 'msid',
+      reg: /^msid:(.*)/,
+      format: "msid:%s"
+    },
+    { //a=ptime:20
+      name: 'ptime',
+      reg: /^ptime:(\d*)/,
+      format: "ptime:%d"
+    },
+    { //a=maxptime:60
+      name: 'maxptime',
+      reg: /^maxptime:(\d*)/,
+      format: "maxptime:%d"
+    },
+    { //a=sendrecv
+      name: 'direction',
+      reg: /^(sendrecv|recvonly|sendonly|inactive)/
+    },
+    { //a=ice-lite
+      name: 'icelite',
+      reg: /^(ice-lite)/
+    },
+    { //a=ice-ufrag:F7gI
+      name: 'iceUfrag',
+      reg: /^ice-ufrag:(\S*)/,
+      format: "ice-ufrag:%s"
+    },
+    { //a=ice-pwd:x9cml/YzichV2+XlhiMu8g
+      name: 'icePwd',
+      reg: /^ice-pwd:(\S*)/,
+      format: "ice-pwd:%s"
+    },
+    { //a=fingerprint:SHA-1 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33
+      name: 'fingerprint',
+      reg: /^fingerprint:(\S*) (\S*)/,
+      names: ['type', 'hash'],
+      format: "fingerprint:%s %s"
+    },
+    {
+      //a=candidate:0 1 UDP 2113667327 203.0.113.1 54400 typ host
+      //a=candidate:1162875081 1 udp 2113937151 192.168.34.75 60017 typ host generation 0
+      //a=candidate:3289912957 2 udp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 generation 0
+      //a=candidate:229815620 1 tcp 1518280447 192.168.150.19 60017 typ host tcptype active generation 0
+      //a=candidate:3289912957 2 tcp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 tcptype passive generation 0
+      push:'candidates',
+      reg: /^candidate:(\S*) (\d*) (\S*) (\d*) (\S*) (\d*) typ (\S*)(?: raddr (\S*) rport (\d*))?(?: tcptype (\S*))?(?: generation (\d*))?/,
+      names: ['foundation', 'component', 'transport', 'priority', 'ip', 'port', 'type', 'raddr', 'rport', 'tcptype', 'generation'],
+      format: function (o) {
+        var str = "candidate:%s %d %s %d %s %d typ %s";
+
+        str += (o.raddr != null) ? " raddr %s rport %d" : "%v%v";
+
+        // NB: candidate has three optional chunks, so %void middles one if it's missing
+        str += (o.tcptype != null) ? " tcptype %s" : "%v";
+
+        if (o.generation != null) {
+          str += " generation %d";
+        }
+        return str;
+      }
+    },
+    { //a=end-of-candidates (keep after the candidates line for readability)
+      name: 'endOfCandidates',
+      reg: /^(end-of-candidates)/
+    },
+    { //a=remote-candidates:1 203.0.113.1 54400 2 203.0.113.1 54401 ...
+      name: 'remoteCandidates',
+      reg: /^remote-candidates:(.*)/,
+      format: "remote-candidates:%s"
+    },
+    { //a=ice-options:google-ice
+      name: 'iceOptions',
+      reg: /^ice-options:(\S*)/,
+      format: "ice-options:%s"
+    },
+    { //a=ssrc:2566107569 cname:t9YU8M1UxTF8Y1A1
+      push: "ssrcs",
+      reg: /^ssrc:(\d*) ([\w_]*):(.*)/,
+      names: ['id', 'attribute', 'value'],
+      format: "ssrc:%d %s:%s"
+    },
+    { //a=ssrc-group:FEC 1 2
+      push: "ssrcGroups",
+      reg: /^ssrc-group:(\w*) (.*)/,
+      names: ['semantics', 'ssrcs'],
+      format: "ssrc-group:%s %s"
+    },
+    { //a=msid-semantic: WMS Jvlam5X3SX1OP6pn20zWogvaKJz5Hjf9OnlV
+      name: "msidSemantic",
+      reg: /^msid-semantic:\s?(\w*) (\S*)/,
+      names: ['semantic', 'token'],
+      format: "msid-semantic: %s %s" // space after ":" is not accidental
+    },
+    { //a=group:BUNDLE audio video
+      push: 'groups',
+      reg: /^group:(\w*) (.*)/,
+      names: ['type', 'mids'],
+      format: "group:%s %s"
+    },
+    { //a=rtcp-mux
+      name: 'rtcpMux',
+      reg: /^(rtcp-mux)/
+    },
+    { //a=rtcp-rsize
+      name: 'rtcpRsize',
+      reg: /^(rtcp-rsize)/
+    },
+    { //a=sctpmap:5000 webrtc-datachannel 1024
+      name: 'sctpmap',
+      reg: /^sctpmap:([\w_\/]*) (\S*)(?: (\S*))?/,
+      names: ['sctpmapNumber', 'app', 'maxMessageSize'],
+      format: function (o) {
+        return (o.maxMessageSize != null) ?
+          "sctpmap:%s %s %s" :
+          "sctpmap:%s %s";
+      }
+    },
+    { // any a= that we don't understand is kepts verbatim on media.invalid
+      push: 'invalid',
+      names: ["value"]
+    }
+  ]
+};
+
+// set sensible defaults to avoid polluting the grammar with boring details
+Object.keys(grammar).forEach(function (key) {
+  var objs = grammar[key];
+  objs.forEach(function (obj) {
+    if (!obj.reg) {
+      obj.reg = /(.*)/;
+    }
+    if (!obj.format) {
+      obj.format = "%s";
+    }
+  });
+});
+
+},{}],37:[function(require,module,exports){
+var parser = require('./parser');
+var writer = require('./writer');
+
+exports.write = writer;
+exports.parse = parser.parse;
+exports.parseFmtpConfig = parser.parseFmtpConfig;
+exports.parsePayloads = parser.parsePayloads;
+exports.parseRemoteCandidates = parser.parseRemoteCandidates;
+
+},{"./parser":38,"./writer":39}],38:[function(require,module,exports){
+var toIntIfInt = function (v) {
+  return String(Number(v)) === v ? Number(v) : v;
+};
+
+var attachProperties = function (match, location, names, rawName) {
+  if (rawName && !names) {
+    location[rawName] = toIntIfInt(match[1]);
+  }
+  else {
+    for (var i = 0; i < names.length; i += 1) {
+      if (match[i+1] != null) {
+        location[names[i]] = toIntIfInt(match[i+1]);
+      }
+    }
+  }
+};
+
+var parseReg = function (obj, location, content) {
+  var needsBlank = obj.name && obj.names;
+  if (obj.push && !location[obj.push]) {
+    location[obj.push] = [];
+  }
+  else if (needsBlank && !location[obj.name]) {
+    location[obj.name] = {};
+  }
+  var keyLocation = obj.push ?
+    {} :  // blank object that will be pushed
+    needsBlank ? location[obj.name] : location; // otherwise, named location or root
+
+  attachProperties(content.match(obj.reg), keyLocation, obj.names, obj.name);
+
+  if (obj.push) {
+    location[obj.push].push(keyLocation);
+  }
+};
+
+var grammar = require('./grammar');
+var validLine = RegExp.prototype.test.bind(/^([a-z])=(.*)/);
+
+exports.parse = function (sdp) {
+  var session = {}
+    , media = []
+    , location = session; // points at where properties go under (one of the above)
+
+  // parse lines we understand
+  sdp.split(/(\r\n|\r|\n)/).filter(validLine).forEach(function (l) {
+    var type = l[0];
+    var content = l.slice(2);
+    if (type === 'm') {
+      media.push({rtp: [], fmtp: []});
+      location = media[media.length-1]; // point at latest media line
+    }
+
+    for (var j = 0; j < (grammar[type] || []).length; j += 1) {
+      var obj = grammar[type][j];
+      if (obj.reg.test(content)) {
+        return parseReg(obj, location, content);
+      }
+    }
+  });
+
+  session.media = media; // link it up
+  return session;
+};
+
+var fmtpReducer = function (acc, expr) {
+  var s = expr.split(/=(.+)/, 2);
+  if (s.length === 2) {
+    acc[s[0]] = toIntIfInt(s[1]);
+  }
+  return acc;
+};
+
+exports.parseFmtpConfig = function (str) {
+  return str.split(/\;\s?/).reduce(fmtpReducer, {});
+};
+
+exports.parsePayloads = function (str) {
+  return str.split(' ').map(Number);
+};
+
+exports.parseRemoteCandidates = function (str) {
+  var candidates = [];
+  var parts = str.split(' ').map(toIntIfInt);
+  for (var i = 0; i < parts.length; i += 3) {
+    candidates.push({
+      component: parts[i],
+      ip: parts[i + 1],
+      port: parts[i + 2]
+    });
+  }
+  return candidates;
+};
+
+},{"./grammar":36}],39:[function(require,module,exports){
+var grammar = require('./grammar');
+
+// customized util.format - discards excess arguments and can void middle ones
+var formatRegExp = /%[sdv%]/g;
+var format = function (formatStr) {
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  return formatStr.replace(formatRegExp, function (x) {
+    if (i >= len) {
+      return x; // missing argument
+    }
+    var arg = args[i];
+    i += 1;
+    switch (x) {
+      case '%%':
+        return '%';
+      case '%s':
+        return String(arg);
+      case '%d':
+        return Number(arg);
+      case '%v':
+        return '';
+    }
+  });
+  // NB: we discard excess arguments - they are typically undefined from makeLine
+};
+
+var makeLine = function (type, obj, location) {
+  var str = obj.format instanceof Function ?
+    (obj.format(obj.push ? location : location[obj.name])) :
+    obj.format;
+
+  var args = [type + '=' + str];
+  if (obj.names) {
+    for (var i = 0; i < obj.names.length; i += 1) {
+      var n = obj.names[i];
+      if (obj.name) {
+        args.push(location[obj.name][n]);
+      }
+      else { // for mLine and push attributes
+        args.push(location[obj.names[i]]);
+      }
+    }
+  }
+  else {
+    args.push(location[obj.name]);
+  }
+  return format.apply(null, args);
+};
+
+// RFC specified order
+// TODO: extend this with all the rest
+var defaultOuterOrder = [
+  'v', 'o', 's', 'i',
+  'u', 'e', 'p', 'c',
+  'b', 't', 'r', 'z', 'a'
+];
+var defaultInnerOrder = ['i', 'c', 'b', 'a'];
+
+
+module.exports = function (session, opts) {
+  opts = opts || {};
+  // ensure certain properties exist
+  if (session.version == null) {
+    session.version = 0; // "v=0" must be there (only defined version atm)
+  }
+  if (session.name == null) {
+    session.name = " "; // "s= " must be there if no meaningful name set
+  }
+  session.media.forEach(function (mLine) {
+    if (mLine.payloads == null) {
+      mLine.payloads = "";
+    }
+  });
+
+  var outerOrder = opts.outerOrder || defaultOuterOrder;
+  var innerOrder = opts.innerOrder || defaultInnerOrder;
+  var sdp = [];
+
+  // loop through outerOrder for matching properties on session
+  outerOrder.forEach(function (type) {
+    grammar[type].forEach(function (obj) {
+      if (obj.name in session && session[obj.name] != null) {
+        sdp.push(makeLine(type, obj, session));
+      }
+      else if (obj.push in session && session[obj.push] != null) {
+        session[obj.push].forEach(function (el) {
+          sdp.push(makeLine(type, obj, el));
+        });
+      }
+    });
+  });
+
+  // then for each media line, follow the innerOrder
+  session.media.forEach(function (mLine) {
+    sdp.push(makeLine('m', grammar.m[0], mLine));
+
+    innerOrder.forEach(function (type) {
+      grammar[type].forEach(function (obj) {
+        if (obj.name in mLine && mLine[obj.name] != null) {
+          sdp.push(makeLine(type, obj, mLine));
+        }
+        else if (obj.push in mLine && mLine[obj.push] != null) {
+          mLine[obj.push].forEach(function (el) {
+            sdp.push(makeLine(type, obj, el));
+          });
+        }
+      });
+    });
+  });
+
+  return sdp.join('\r\n') + '\r\n';
+};
+
+},{"./grammar":36}],40:[function(require,module,exports){
+module.exports={
+  "name": "jssip",
+  "title": "JsSIP",
+  "description": "the Javascript SIP library",
+  "version": "2.0.6",
+  "homepage": "http://jssip.net",
+  "author": "José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)",
+  "contributors": [
+    "Iñaki Baz Castillo <ibc@aliax.net> (https://github.com/ibc)",
+    "Saúl Ibarra Corretgé <saghul@gmail.com> (https://github.com/saghul)"
+  ],
+  "main": "lib/JsSIP.js",
+  "keywords": [
+    "sip",
+    "websocket",
+    "webrtc",
+    "node",
+    "browser",
+    "library"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/versatica/JsSIP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/versatica/JsSIP/issues"
+  },
+  "dependencies": {
+    "debug": "^2.2.0",
+    "rtcninja": "^0.7.0",
+    "sdp-transform": "^1.6.2"
+  },
+  "devDependencies": {
+    "browserify": "^13.1.0",
+    "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
+    "gulp-expect-file": "0.0.7",
+    "gulp-header": "1.8.8",
+    "gulp-jshint": "^2.0.1",
+    "gulp-nodeunit-runner": "^0.2.2",
+    "gulp-rename": "^1.2.2",
+    "gulp-uglify": "^2.0.0",
+    "gulp-util": "^3.0.7",
+    "jshint": "^2.9.3",
+    "jshint-stylish": "^2.2.1",
+    "pegjs": "0.7.0",
+    "vinyl-buffer": "^1.0.0",
+    "vinyl-source-stream": "^1.1.0"
+  },
+  "scripts": {
+    "test": "gulp test"
+  }
+}
+
+},{}],41:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -22917,302 +23536,324 @@ module.exports = Adapter;
 // Dependencies
 
 var browser = require('bowser'),
-  debug = require('debug')('rtcninja:Adapter'),
-  debugerror = require('debug')('rtcninja:ERROR:Adapter'),
+	debug = require('debug')('rtcninja:Adapter'),
+	debugerror = require('debug')('rtcninja:ERROR:Adapter'),
 
-  // Internal vars
-  getUserMedia = null,
-  RTCPeerConnection = null,
-  RTCSessionDescription = null,
-  RTCIceCandidate = null,
-  MediaStreamTrack = null,
-  getMediaDevices = null,
-  attachMediaStream = null,
-  canRenegotiate = false,
-  oldSpecRTCOfferOptions = false,
-  browserVersion = Number(browser.version) || 0,
-  isDesktop = !!(!browser.mobile && (!browser.tablet || (browser.msie && browserVersion >= 10))),
-  hasWebRTC = false,
-  virtGlobal, virtNavigator;
+	// Internal vars
+	getUserMedia = null,
+	mediaDevices = null,
+	RTCPeerConnection = null,
+	RTCSessionDescription = null,
+	RTCIceCandidate = null,
+	MediaStreamTrack = null,
+	getMediaDevices = null,
+	attachMediaStream = null,
+	canRenegotiate = false,
+	oldSpecRTCOfferOptions = false,
+	browserVersion = Number(browser.version) || 0,
+	isDesktop = !!(!browser.mobile && (!browser.tablet || (browser.msie && browserVersion >= 10))),
+	hasWebRTC = false,
+	// Dirty trick to get this library working in a Node-webkit env with browserified libs
+	virtGlobal = global.window || global,
+	// Don't fail in Node
+	virtNavigator = virtGlobal.navigator || {};
 
 debugerror.log = console.warn.bind(console);
-
-// Dirty trick to get this library working in a Node-webkit env with browserified libs
-virtGlobal = global.window || global;
-// Don't fail in Node
-virtNavigator = virtGlobal.navigator || {};
 
 
 // Constructor.
 
 function Adapter(options) {
-  // Chrome desktop, Chrome Android, Opera desktop, Opera Android, Android native browser
-  // or generic Webkit browser.
-  if (
-    (isDesktop && browser.chrome && browserVersion >= 32) ||
-    (browser.android && browser.chrome && browserVersion >= 39) ||
-    (isDesktop && browser.opera && browserVersion >= 27) ||
-    (browser.android && browser.opera && browserVersion >= 24) ||
-    (browser.android && browser.webkit && !browser.chrome && browserVersion >= 37) ||
-    (virtNavigator.webkitGetUserMedia && virtGlobal.webkitRTCPeerConnection)
-  ) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.webkitGetUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.webkitRTCPeerConnection;
-    RTCSessionDescription = virtGlobal.RTCSessionDescription;
-    RTCIceCandidate = virtGlobal.RTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = true;
-    oldSpecRTCOfferOptions = false;
-  // Firefox desktop, Firefox Android.
-  } else if (
-    (isDesktop && browser.firefox && browserVersion >= 22) ||
-    (browser.android && browser.firefox && browserVersion >= 33) ||
-    (virtNavigator.mozGetUserMedia && virtGlobal.mozRTCPeerConnection)
-  ) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.mozRTCPeerConnection;
-    RTCSessionDescription = virtGlobal.mozRTCSessionDescription;
-    RTCIceCandidate = virtGlobal.mozRTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    attachMediaStream = function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = false;
-    oldSpecRTCOfferOptions = false;
-    // WebRTC plugin required. For example IE or Safari with the Temasys plugin.
-  } else if (
-    options.plugin &&
-    typeof options.plugin.isRequired === 'function' &&
-    options.plugin.isRequired() &&
-    typeof options.plugin.isInstalled === 'function' &&
-    options.plugin.isInstalled()
-  ) {
-    var pluginiface = options.plugin.interface;
+	// Chrome desktop, Chrome Android, Opera desktop, Opera Android, Android native browser
+	// or generic Webkit browser.
+	if (
+		(isDesktop && browser.chrome && browserVersion >= 32) ||
+		(browser.android && browser.chrome && browserVersion >= 39) ||
+		(isDesktop && browser.opera && browserVersion >= 27) ||
+		(browser.android && browser.opera && browserVersion >= 24) ||
+		(browser.android && browser.webkit && !browser.chrome && browserVersion >= 37) ||
+		(virtNavigator.webkitGetUserMedia && virtGlobal.webkitRTCPeerConnection)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.webkitGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.webkitRTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = true;
+		oldSpecRTCOfferOptions = false;
+	// Old Firefox desktop, old Firefox Android.
+	} else if (
+		(browser.firefox && browserVersion < 47) ||
+		(virtNavigator.mozGetUserMedia && virtGlobal.mozRTCPeerConnection)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.mozRTCPeerConnection;
+		RTCSessionDescription = virtGlobal.mozRTCSessionDescription;
+		RTCIceCandidate = virtGlobal.mozRTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = false;
+		oldSpecRTCOfferOptions = false;
+	// Modern Firefox desktop, modern Firefox Android.
+	} else if (
+		((browser.firefox || browser.gecko) && browserVersion >= 47)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.RTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = false;
+		oldSpecRTCOfferOptions = false;
+		// WebRTC plugin required. For example IE or Safari with the Temasys plugin.
+	} else if (
+		options.plugin &&
+		typeof options.plugin.isRequired === 'function' &&
+		options.plugin.isRequired() &&
+		typeof options.plugin.isInstalled === 'function' &&
+		options.plugin.isInstalled()
+	) {
+		var pluginiface = options.plugin.interface;
 
-    hasWebRTC = true;
-    getUserMedia = pluginiface.getUserMedia;
-    RTCPeerConnection = pluginiface.RTCPeerConnection;
-    RTCSessionDescription = pluginiface.RTCSessionDescription;
-    RTCIceCandidate = pluginiface.RTCIceCandidate;
-    MediaStreamTrack = pluginiface.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = pluginiface.attachMediaStream;
-    canRenegotiate = pluginiface.canRenegotiate;
-    oldSpecRTCOfferOptions = true;
-  // Best effort (may be adater.js is loaded).
-  } else if (virtNavigator.getUserMedia && virtGlobal.RTCPeerConnection) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.getUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.RTCPeerConnection;
-    RTCSessionDescription = virtGlobal.RTCSessionDescription;
-    RTCIceCandidate = virtGlobal.RTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = virtGlobal.attachMediaStream || function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = true;
-    oldSpecRTCOfferOptions = false;
-  }
+		hasWebRTC = true;
+		getUserMedia = pluginiface.getUserMedia;
+		mediaDevices = pluginiface.mediaDevices;
+		RTCPeerConnection = pluginiface.RTCPeerConnection;
+		RTCSessionDescription = pluginiface.RTCSessionDescription;
+		RTCIceCandidate = pluginiface.RTCIceCandidate;
+		MediaStreamTrack = pluginiface.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = pluginiface.attachMediaStream;
+		canRenegotiate = pluginiface.canRenegotiate;
+		oldSpecRTCOfferOptions = true;
+	// Best effort (may be adater.js is loaded).
+	} else if (virtNavigator.getUserMedia && virtGlobal.RTCPeerConnection) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.getUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.RTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = virtGlobal.attachMediaStream || function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = true;
+		oldSpecRTCOfferOptions = false;
+	}
 
 
-  function throwNonSupported(item) {
-    return function () {
-      throw new Error('rtcninja: WebRTC not supported, missing ' + item +
-      ' [browser: ' + browser.name + ' ' + browser.version + ']');
-    };
-  }
+	function throwNonSupported(item) {
+		return function () {
+			throw new Error('rtcninja: WebRTC not supported, missing ' + item +
+			' [browser: ' + browser.name + ' ' + browser.version + ']');
+		};
+	}
 
 
-  // Public API.
+	// Public API.
 
-  // Expose a WebRTC checker.
-  Adapter.hasWebRTC = function () {
-    return hasWebRTC;
-  };
+	// Expose a WebRTC checker.
+	Adapter.hasWebRTC = function () {
+		return hasWebRTC;
+	};
 
-  // Expose getUserMedia.
-  if (getUserMedia) {
-    Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
-      debug('getUserMedia() | constraints: %o', constraints);
+	// Expose getUserMedia.
+	if (getUserMedia) {
+		Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
+			debug('getUserMedia() | constraints: %o', constraints);
 
-      try {
-        getUserMedia(constraints,
-          function (stream) {
-            debug('getUserMedia() | success');
-            if (successCallback) {
-              successCallback(stream);
-            }
-          },
-          function (error) {
-            debug('getUserMedia() | error:', error);
-            if (errorCallback) {
-              errorCallback(error);
-            }
-          }
-        );
-      }
-      catch (error) {
-        debugerror('getUserMedia() | error:', error);
-        if (errorCallback) {
-          errorCallback(error);
-        }
-      }
-    };
-  } else {
-    Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
-      debugerror('getUserMedia() | WebRTC not supported');
-      if (errorCallback) {
-        errorCallback(new Error('rtcninja: WebRTC not supported, missing ' +
-        'getUserMedia [browser: ' + browser.name + ' ' + browser.version + ']'));
-      } else {
-        throwNonSupported('getUserMedia');
-      }
-    };
-  }
+			try {
+				getUserMedia(constraints,
+					function (stream) {
+						debug('getUserMedia() | success');
+						if (successCallback) {
+							successCallback(stream);
+						}
+					},
+					function (error) {
+						debug('getUserMedia() | error:', error);
+						if (errorCallback) {
+							errorCallback(error);
+						}
+					}
+				);
+			}
+			catch (error) {
+				debugerror('getUserMedia() | error:', error);
+				if (errorCallback) {
+					errorCallback(error);
+				}
+			}
+		};
+	} else {
+		Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
+			debugerror('getUserMedia() | WebRTC not supported');
+			if (errorCallback) {
+				errorCallback(new Error('rtcninja: WebRTC not supported, missing ' +
+				'getUserMedia [browser: ' + browser.name + ' ' + browser.version + ']'));
+			} else {
+				throwNonSupported('getUserMedia');
+			}
+		};
+	}
 
-  // Expose RTCPeerConnection.
-  Adapter.RTCPeerConnection = RTCPeerConnection || throwNonSupported('RTCPeerConnection');
+	// Expose mediaDevices.
+	Adapter.mediaDevices = mediaDevices;
 
-  // Expose RTCSessionDescription.
-  Adapter.RTCSessionDescription = RTCSessionDescription || throwNonSupported('RTCSessionDescription');
+	// Expose RTCPeerConnection.
+	Adapter.RTCPeerConnection = RTCPeerConnection || throwNonSupported('RTCPeerConnection');
 
-  // Expose RTCIceCandidate.
-  Adapter.RTCIceCandidate = RTCIceCandidate || throwNonSupported('RTCIceCandidate');
+	// Expose RTCSessionDescription.
+	Adapter.RTCSessionDescription = RTCSessionDescription || throwNonSupported('RTCSessionDescription');
 
-  // Expose MediaStreamTrack.
-  Adapter.MediaStreamTrack = MediaStreamTrack || throwNonSupported('MediaStreamTrack');
+	// Expose RTCIceCandidate.
+	Adapter.RTCIceCandidate = RTCIceCandidate || throwNonSupported('RTCIceCandidate');
 
-  // Expose getMediaDevices.
-  Adapter.getMediaDevices = getMediaDevices;
+	// Expose MediaStreamTrack.
+	Adapter.MediaStreamTrack = MediaStreamTrack || throwNonSupported('MediaStreamTrack');
 
-  // Expose MediaStreamTrack.
-  Adapter.attachMediaStream = attachMediaStream || throwNonSupported('attachMediaStream');
+	// Expose getMediaDevices.
+	Adapter.getMediaDevices = getMediaDevices;
 
-  // Expose canRenegotiate attribute.
-  Adapter.canRenegotiate = canRenegotiate;
+	// Expose MediaStreamTrack.
+	Adapter.attachMediaStream = attachMediaStream || throwNonSupported('attachMediaStream');
 
-  // Expose closeMediaStream.
-  Adapter.closeMediaStream = function (stream) {
-    if (!stream) {
-      return;
-    }
+	// Expose canRenegotiate attribute.
+	Adapter.canRenegotiate = canRenegotiate;
 
-    // Latest spec states that MediaStream has no stop() method and instead must
-    // call stop() on every MediaStreamTrack.
-    try {
-      debug('closeMediaStream() | calling stop() on all the MediaStreamTrack');
+	// Expose closeMediaStream.
+	Adapter.closeMediaStream = function (stream) {
+		if (!stream) {
+			return;
+		}
 
-      var tracks, i, len;
+		// Latest spec states that MediaStream has no stop() method and instead must
+		// call stop() on every MediaStreamTrack.
+		try {
+			debug('closeMediaStream() | calling stop() on all the MediaStreamTrack');
 
-      if (stream.getTracks) {
-        tracks = stream.getTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-      } else {
-        tracks = stream.getAudioTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-        tracks = stream.getVideoTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-      }
-    } catch (error) {
-      // Deprecated by the spec, but still in use.
-      // NOTE: In Temasys IE plugin stream.stop is a callable 'object'.
-      if (typeof stream.stop === 'function' || typeof stream.stop === 'object') {
-        debug('closeMediaStream() | calling stop() on the MediaStream');
+			var tracks, i, len;
 
-        stream.stop();
-      }
-    }
-  };
+			if (stream.getTracks) {
+				tracks = stream.getTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+			} else {
+				tracks = stream.getAudioTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+				tracks = stream.getVideoTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+			}
+		} catch (error) {
+			// Deprecated by the spec, but still in use.
+			// NOTE: In Temasys IE plugin stream.stop is a callable 'object'.
+			if (typeof stream.stop === 'function' || typeof stream.stop === 'object') {
+				debug('closeMediaStream() | calling stop() on the MediaStream');
 
-  // Expose fixPeerConnectionConfig.
-  Adapter.fixPeerConnectionConfig = function (pcConfig) {
-    var i, len, iceServer, hasUrls, hasUrl;
+				stream.stop();
+			}
+		}
+	};
 
-    if (!Array.isArray(pcConfig.iceServers)) {
-      pcConfig.iceServers = [];
-    }
+	// Expose fixPeerConnectionConfig.
+	Adapter.fixPeerConnectionConfig = function (pcConfig) {
+		var i, len, iceServer, hasUrls, hasUrl;
 
-    for (i = 0, len = pcConfig.iceServers.length; i < len; i += 1) {
-      iceServer = pcConfig.iceServers[i];
-      hasUrls = iceServer.hasOwnProperty('urls');
-      hasUrl = iceServer.hasOwnProperty('url');
+		if (!Array.isArray(pcConfig.iceServers)) {
+			pcConfig.iceServers = [];
+		}
 
-      if (typeof iceServer === 'object') {
-        // Has .urls but not .url, so add .url with a single string value.
-        if (hasUrls && !hasUrl) {
-          iceServer.url = (Array.isArray(iceServer.urls) ? iceServer.urls[0] : iceServer.urls);
-        // Has .url but not .urls, so add .urls with same value.
-        } else if (!hasUrls && hasUrl) {
-          iceServer.urls = (Array.isArray(iceServer.url) ? iceServer.url.slice() : iceServer.url);
-        }
+		for (i = 0, len = pcConfig.iceServers.length; i < len; i += 1) {
+			iceServer = pcConfig.iceServers[i];
+			hasUrls = iceServer.hasOwnProperty('urls');
+			hasUrl = iceServer.hasOwnProperty('url');
 
-        // Ensure .url is a single string.
-        if (hasUrl && Array.isArray(iceServer.url)) {
-          iceServer.url = iceServer.url[0];
-        }
-      }
-    }
-  };
+			if (typeof iceServer === 'object') {
+				// Has .urls but not .url, so add .url with a single string value.
+				if (hasUrls && !hasUrl) {
+					iceServer.url = (Array.isArray(iceServer.urls) ? iceServer.urls[0] : iceServer.urls);
+				// Has .url but not .urls, so add .urls with same value.
+				} else if (!hasUrls && hasUrl) {
+					iceServer.urls = (Array.isArray(iceServer.url) ? iceServer.url.slice() : iceServer.url);
+				}
 
-  // Expose fixRTCOfferOptions.
-  Adapter.fixRTCOfferOptions = function (options) {
-    options = options || {};
+				// Ensure .url is a single string.
+				if (hasUrl && Array.isArray(iceServer.url)) {
+					iceServer.url = iceServer.url[0];
+				}
+			}
+		}
+	};
 
-    // New spec.
-    if (!oldSpecRTCOfferOptions) {
-      if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveAudio')) {
-        options.offerToReceiveAudio = options.mandatory.OfferToReceiveAudio ? 1 : 0;
-      }
-      if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveVideo')) {
-        options.offerToReceiveVideo = options.mandatory.OfferToReceiveVideo ? 1 : 0;
-      }
-      delete options.mandatory;
-    // Old spec.
-    } else {
-      if (options.hasOwnProperty('offerToReceiveAudio')) {
-        options.mandatory = options.mandatory || {};
-        options.mandatory.OfferToReceiveAudio = options.offerToReceiveAudio ? true : false;
-      }
-      if (options.hasOwnProperty('offerToReceiveVideo')) {
-        options.mandatory = options.mandatory || {};
-        options.mandatory.OfferToReceiveVideo = options.offerToReceiveVideo ? true : false;
-      }
-    }
-  };
+	// Expose fixRTCOfferOptions.
+	Adapter.fixRTCOfferOptions = function (options) {
+		options = options || {};
 
-  return Adapter;
+		// New spec.
+		if (!oldSpecRTCOfferOptions) {
+			if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveAudio')) {
+				options.offerToReceiveAudio = options.mandatory.OfferToReceiveAudio ? 1 : 0;
+			}
+			if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveVideo')) {
+				options.offerToReceiveVideo = options.mandatory.OfferToReceiveVideo ? 1 : 0;
+			}
+			delete options.mandatory;
+		// Old spec.
+		} else {
+			if (options.hasOwnProperty('offerToReceiveAudio')) {
+				options.mandatory = options.mandatory || {};
+				options.mandatory.OfferToReceiveAudio = options.offerToReceiveAudio ? true : false;
+			}
+			if (options.hasOwnProperty('offerToReceiveVideo')) {
+				options.mandatory = options.mandatory || {};
+				options.mandatory.OfferToReceiveVideo = options.offerToReceiveVideo ? true : false;
+			}
+		}
+	};
+
+	return Adapter;
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"bowser":40,"debug":33}],37:[function(require,module,exports){
+},{"bowser":45,"debug":46}],42:[function(require,module,exports){
 'use strict';
 
 // Expose the RTCPeerConnection class.
@@ -23222,23 +23863,23 @@ module.exports = RTCPeerConnection;
 // Dependencies.
 
 var merge = require('merge'),
-  debug = require('debug')('rtcninja:RTCPeerConnection'),
-  debugerror = require('debug')('rtcninja:ERROR:RTCPeerConnection'),
-  Adapter = require('./Adapter'),
+	debug = require('debug')('rtcninja:RTCPeerConnection'),
+	debugerror = require('debug')('rtcninja:ERROR:RTCPeerConnection'),
+	Adapter = require('./Adapter'),
 
-  // Internal constants.
-  C = {
-    REGEXP_NORMALIZED_CANDIDATE: new RegExp(/^candidate:/i),
-    REGEXP_FIX_CANDIDATE: new RegExp(/(^a=|\r|\n)/gi),
-    REGEXP_RELAY_CANDIDATE: new RegExp(/ relay /i),
-    REGEXP_SDP_CANDIDATES: new RegExp(/^a=candidate:.*\r\n/igm),
-    REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm)
-  },
+	// Internal constants.
+	C = {
+		REGEXP_NORMALIZED_CANDIDATE: new RegExp(/^candidate:/i),
+		REGEXP_FIX_CANDIDATE: new RegExp(/(^a=|\r|\n)/gi),
+		REGEXP_RELAY_CANDIDATE: new RegExp(/ relay /i),
+		REGEXP_SDP_CANDIDATES: new RegExp(/^a=candidate:.*\r\n/igm),
+		REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm)
+	},
 
-  // Internal variables.
-  VAR = {
-    normalizeCandidate: null
-  };
+	// Internal variables.
+	VAR = {
+		normalizeCandidate: null
+	};
 
 debugerror.log = console.warn.bind(console);
 
@@ -23246,724 +23887,728 @@ debugerror.log = console.warn.bind(console);
 // Constructor
 
 function RTCPeerConnection(pcConfig, pcConstraints) {
-  debug('new | [pcConfig:%o, pcConstraints:%o]', pcConfig, pcConstraints);
+	debug('new | [pcConfig:%o, pcConstraints:%o]', pcConfig, pcConstraints);
 
-  // Set this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
+	// Set this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
 
-  // NOTE: Deprecated pcConstraints argument.
-  this.pcConstraints = pcConstraints;
+	// NOTE: Deprecated pcConstraints argument.
+	this.pcConstraints = pcConstraints;
 
-  // Own version of the localDescription.
-  this.ourLocalDescription = null;
+	// Own version of the localDescription.
+	this.ourLocalDescription = null;
 
-  // Latest values of PC attributes to avoid events with same value.
-  this.ourSignalingState = null;
-  this.ourIceConnectionState = null;
-  this.ourIceGatheringState = null;
+	// Latest values of PC attributes to avoid events with same value.
+	this.ourSignalingState = null;
+	this.ourIceConnectionState = null;
+	this.ourIceGatheringState = null;
 
-  // Timer for options.gatheringTimeout.
-  this.timerGatheringTimeout = null;
+	// Timer for options.gatheringTimeout.
+	this.timerGatheringTimeout = null;
 
-  // Timer for options.gatheringTimeoutAfterRelay.
-  this.timerGatheringTimeoutAfterRelay = null;
+	// Timer for options.gatheringTimeoutAfterRelay.
+	this.timerGatheringTimeoutAfterRelay = null;
 
-  // Flag to ignore new gathered ICE candidates.
-  this.ignoreIceGathering = false;
+	// Flag to ignore new gathered ICE candidates.
+	this.ignoreIceGathering = false;
 
-  // Flag set when closed.
-  this.closed = false;
+	// Flag set when closed.
+	this.closed = false;
 
-  // Set RTCPeerConnection.
-  setPeerConnection.call(this);
+	// Set RTCPeerConnection.
+	setPeerConnection.call(this);
 
-  // Set properties.
-  setProperties.call(this);
+	// Set properties.
+	setProperties.call(this);
 }
 
 
 // Public API.
 
 RTCPeerConnection.prototype.createOffer = function (successCallback, failureCallback, options) {
-  debug('createOffer()');
+	debug('createOffer()');
 
-  var self = this;
+	var self = this;
 
-  Adapter.fixRTCOfferOptions(options);
+	Adapter.fixRTCOfferOptions(options);
 
-  this.pc.createOffer(
-    function (offer) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('createOffer() | success');
-      if (successCallback) {
-        successCallback(offer);
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('createOffer() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    },
-    options
-  );
+	this.pc.createOffer(
+		function (offer) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('createOffer() | success');
+			if (successCallback) {
+				successCallback(offer);
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('createOffer() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		},
+		options
+	);
 };
 
 
 RTCPeerConnection.prototype.createAnswer = function (successCallback, failureCallback, options) {
-  debug('createAnswer()');
+	debug('createAnswer()');
 
-  var self = this;
+	var self = this;
 
-  this.pc.createAnswer(
-    function (answer) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('createAnswer() | success');
-      if (successCallback) {
-        successCallback(answer);
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('createAnswer() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    },
-    options
-  );
+	this.pc.createAnswer(
+		function (answer) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('createAnswer() | success');
+			if (successCallback) {
+				successCallback(answer);
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('createAnswer() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		},
+		options
+	);
 };
 
 
 RTCPeerConnection.prototype.setLocalDescription = function (description, successCallback, failureCallback) {
-  debug('setLocalDescription()');
+	debug('setLocalDescription()');
 
-  var self = this;
+	var self = this;
 
-  this.pc.setLocalDescription(
-    description,
-    // success.
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('setLocalDescription() | success');
+	this.pc.setLocalDescription(
+		description,
+		// success.
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('setLocalDescription() | success');
 
-      // Clear gathering timers.
-      clearTimeout(self.timerGatheringTimeout);
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
+			// Clear gathering timers.
+			clearTimeout(self.timerGatheringTimeout);
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
 
-      runTimerGatheringTimeout();
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    // failure
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('setLocalDescription() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
+			runTimerGatheringTimeout();
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		// failure
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('setLocalDescription() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
 
-  // Enable (again) ICE gathering.
-  this.ignoreIceGathering = false;
+	// Enable (again) ICE gathering.
+	this.ignoreIceGathering = false;
 
-  // Handle gatheringTimeout.
-  function runTimerGatheringTimeout() {
-    if (typeof self.options.gatheringTimeout !== 'number') {
-      return;
-    }
-    // If setLocalDescription was already called, it may happen that
-    // ICE gathering is not needed, so don't run this timer.
-    if (self.pc.iceGatheringState === 'complete') {
-      return;
-    }
+	// Handle gatheringTimeout.
+	function runTimerGatheringTimeout() {
+		if (typeof self.options.gatheringTimeout !== 'number') {
+			return;
+		}
+		// If setLocalDescription was already called, it may happen that
+		// ICE gathering is not needed, so don't run this timer.
+		if (self.pc.iceGatheringState === 'complete') {
+			return;
+		}
 
-    debug('setLocalDescription() | ending gathering in %d ms (gatheringTimeout option)',
-      self.options.gatheringTimeout);
+		debug('setLocalDescription() | ending gathering in %d ms (gatheringTimeout option)',
+			self.options.gatheringTimeout);
 
-    self.timerGatheringTimeout = setTimeout(function () {
-      if (isClosed.call(self)) {
-        return;
-      }
+		self.timerGatheringTimeout = setTimeout(function () {
+			if (isClosed.call(self)) {
+				return;
+			}
 
-      debug('forced end of candidates after gatheringTimeout timeout');
+			debug('forced end of candidates after gatheringTimeout timeout');
 
-      // Clear gathering timers.
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
+			// Clear gathering timers.
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
 
-      // Ignore new candidates.
-      self.ignoreIceGathering = true;
-      if (self.onicecandidate) {
-        self.onicecandidate({ candidate: null }, null);
-      }
+			// Ignore new candidates.
+			self.ignoreIceGathering = true;
+			if (self.onicecandidate) {
+				self.onicecandidate({ candidate: null }, null);
+			}
 
-    }, self.options.gatheringTimeout);
-  }
+		}, self.options.gatheringTimeout);
+	}
 };
 
 
 RTCPeerConnection.prototype.setRemoteDescription = function (description, successCallback, failureCallback) {
-  debug('setRemoteDescription()');
+	debug('setRemoteDescription()');
 
-  var self = this;
+	var self = this;
 
-  this.pc.setRemoteDescription(
-    description,
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('setRemoteDescription() | success');
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('setRemoteDescription() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
+	this.pc.setRemoteDescription(
+		description,
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('setRemoteDescription() | success');
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('setRemoteDescription() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
 };
 
 
 RTCPeerConnection.prototype.updateIce = function (pcConfig) {
-  debug('updateIce() | pcConfig: %o', pcConfig);
+	debug('updateIce() | pcConfig: %o', pcConfig);
 
-  // Update this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
+	// Update this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
 
-  this.pc.updateIce(this.pcConfig);
+	this.pc.updateIce(this.pcConfig);
 
-  // Enable (again) ICE gathering.
-  this.ignoreIceGathering = false;
+	// Enable (again) ICE gathering.
+	this.ignoreIceGathering = false;
 };
 
 
 RTCPeerConnection.prototype.addIceCandidate = function (candidate, successCallback, failureCallback) {
-  debug('addIceCandidate() | candidate: %o', candidate);
+	debug('addIceCandidate() | candidate: %o', candidate);
 
-  var self = this;
+	var self = this;
 
-  this.pc.addIceCandidate(
-    candidate,
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('addIceCandidate() | success');
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('addIceCandidate() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
+	this.pc.addIceCandidate(
+		candidate,
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('addIceCandidate() | success');
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('addIceCandidate() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
 };
 
 
 RTCPeerConnection.prototype.getConfiguration = function () {
-  debug('getConfiguration()');
+	debug('getConfiguration()');
 
-  return this.pc.getConfiguration();
+	return this.pc.getConfiguration();
 };
 
 
 RTCPeerConnection.prototype.getLocalStreams = function () {
-  debug('getLocalStreams()');
+	debug('getLocalStreams()');
 
-  return this.pc.getLocalStreams();
+	return this.pc.getLocalStreams();
 };
 
 
 RTCPeerConnection.prototype.getRemoteStreams = function () {
-  debug('getRemoteStreams()');
+	debug('getRemoteStreams()');
 
-  return this.pc.getRemoteStreams();
+	return this.pc.getRemoteStreams();
 };
 
 
 RTCPeerConnection.prototype.getStreamById = function (streamId) {
-  debug('getStreamById() | streamId: %s', streamId);
+	debug('getStreamById() | streamId: %s', streamId);
 
-  return this.pc.getStreamById(streamId);
+	return this.pc.getStreamById(streamId);
 };
 
 
 RTCPeerConnection.prototype.addStream = function (stream) {
-  debug('addStream() | stream: %s', stream);
+	debug('addStream() | stream: %s', stream);
 
-  this.pc.addStream(stream);
+	this.pc.addStream(stream);
 };
 
 
 RTCPeerConnection.prototype.removeStream = function (stream) {
-  debug('removeStream() | stream: %o', stream);
+	debug('removeStream() | stream: %o', stream);
 
-  this.pc.removeStream(stream);
+	this.pc.removeStream(stream);
 };
 
 
 RTCPeerConnection.prototype.close = function () {
-  debug('close()');
+	debug('close()');
 
-  this.closed = true;
+	this.closed = true;
 
-  // Clear gathering timers.
-  clearTimeout(this.timerGatheringTimeout);
-  delete this.timerGatheringTimeout;
-  clearTimeout(this.timerGatheringTimeoutAfterRelay);
-  delete this.timerGatheringTimeoutAfterRelay;
+	// Clear gathering timers.
+	clearTimeout(this.timerGatheringTimeout);
+	delete this.timerGatheringTimeout;
+	clearTimeout(this.timerGatheringTimeoutAfterRelay);
+	delete this.timerGatheringTimeoutAfterRelay;
 
-  this.pc.close();
+	this.pc.close();
 };
 
 
 RTCPeerConnection.prototype.createDataChannel = function () {
-  debug('createDataChannel()');
+	debug('createDataChannel()');
 
-  return this.pc.createDataChannel.apply(this.pc, arguments);
+	return this.pc.createDataChannel.apply(this.pc, arguments);
 };
 
 
 RTCPeerConnection.prototype.createDTMFSender = function (track) {
-  debug('createDTMFSender()');
+	debug('createDTMFSender()');
 
-  return this.pc.createDTMFSender(track);
+	if (this.pc.createDTMFSender) {
+		return this.pc.createDTMFSender(track);
+	} else {
+		return null;
+	}
 };
 
 
 RTCPeerConnection.prototype.getStats = function () {
-  debug('getStats()');
+	debug('getStats()');
 
-  return this.pc.getStats.apply(this.pc, arguments);
+	return this.pc.getStats.apply(this.pc, arguments);
 };
 
 
 RTCPeerConnection.prototype.setIdentityProvider = function () {
-  debug('setIdentityProvider()');
+	debug('setIdentityProvider()');
 
-  return this.pc.setIdentityProvider.apply(this.pc, arguments);
+	return this.pc.setIdentityProvider.apply(this.pc, arguments);
 };
 
 
 RTCPeerConnection.prototype.getIdentityAssertion = function () {
-  debug('getIdentityAssertion()');
+	debug('getIdentityAssertion()');
 
-  return this.pc.getIdentityAssertion();
+	return this.pc.getIdentityAssertion();
 };
 
 
 RTCPeerConnection.prototype.reset = function (pcConfig) {
-  debug('reset() | pcConfig: %o', pcConfig);
+	debug('reset() | pcConfig: %o', pcConfig);
 
-  var pc = this.pc;
+	var pc = this.pc;
 
-  // Remove events in the old PC.
-  pc.onnegotiationneeded = null;
-  pc.onicecandidate = null;
-  pc.onaddstream = null;
-  pc.onremovestream = null;
-  pc.ondatachannel = null;
-  pc.onsignalingstatechange = null;
-  pc.oniceconnectionstatechange = null;
-  pc.onicegatheringstatechange = null;
-  pc.onidentityresult = null;
-  pc.onpeeridentity = null;
-  pc.onidpassertionerror = null;
-  pc.onidpvalidationerror = null;
+	// Remove events in the old PC.
+	pc.onnegotiationneeded = null;
+	pc.onicecandidate = null;
+	pc.onaddstream = null;
+	pc.onremovestream = null;
+	pc.ondatachannel = null;
+	pc.onsignalingstatechange = null;
+	pc.oniceconnectionstatechange = null;
+	pc.onicegatheringstatechange = null;
+	pc.onidentityresult = null;
+	pc.onpeeridentity = null;
+	pc.onidpassertionerror = null;
+	pc.onidpvalidationerror = null;
 
-  // Clear gathering timers.
-  clearTimeout(this.timerGatheringTimeout);
-  delete this.timerGatheringTimeout;
-  clearTimeout(this.timerGatheringTimeoutAfterRelay);
-  delete this.timerGatheringTimeoutAfterRelay;
+	// Clear gathering timers.
+	clearTimeout(this.timerGatheringTimeout);
+	delete this.timerGatheringTimeout;
+	clearTimeout(this.timerGatheringTimeoutAfterRelay);
+	delete this.timerGatheringTimeoutAfterRelay;
 
-  // Silently close the old PC.
-  debug('reset() | closing current peerConnection');
-  pc.close();
+	// Silently close the old PC.
+	debug('reset() | closing current peerConnection');
+	pc.close();
 
-  // Set this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
+	// Set this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
 
-  // Create a new PC.
-  setPeerConnection.call(this);
+	// Create a new PC.
+	setPeerConnection.call(this);
 };
 
 
 // Private Helpers.
 
 function setConfigurationAndOptions(pcConfig) {
-  // Clone pcConfig.
-  this.pcConfig = merge(true, pcConfig);
+	// Clone pcConfig.
+	this.pcConfig = merge(true, pcConfig);
 
-  // Fix pcConfig.
-  Adapter.fixPeerConnectionConfig(this.pcConfig);
+	// Fix pcConfig.
+	Adapter.fixPeerConnectionConfig(this.pcConfig);
 
-  this.options = {
-    iceTransportsRelay: (this.pcConfig.iceTransports === 'relay'),
-    iceTransportsNone: (this.pcConfig.iceTransports === 'none'),
-    gatheringTimeout: this.pcConfig.gatheringTimeout,
-    gatheringTimeoutAfterRelay: this.pcConfig.gatheringTimeoutAfterRelay
-  };
+	this.options = {
+		iceTransportsRelay: (this.pcConfig.iceTransports === 'relay'),
+		iceTransportsNone: (this.pcConfig.iceTransports === 'none'),
+		gatheringTimeout: this.pcConfig.gatheringTimeout,
+		gatheringTimeoutAfterRelay: this.pcConfig.gatheringTimeoutAfterRelay
+	};
 
-  // Remove custom rtcninja.RTCPeerConnection options from pcConfig.
-  delete this.pcConfig.gatheringTimeout;
-  delete this.pcConfig.gatheringTimeoutAfterRelay;
+	// Remove custom rtcninja.RTCPeerConnection options from pcConfig.
+	delete this.pcConfig.gatheringTimeout;
+	delete this.pcConfig.gatheringTimeoutAfterRelay;
 
-  debug('setConfigurationAndOptions | processed pcConfig: %o', this.pcConfig);
+	debug('setConfigurationAndOptions | processed pcConfig: %o', this.pcConfig);
 }
 
 
 function isClosed() {
-  return ((this.closed) || (this.pc && this.pc.iceConnectionState === 'closed'));
+	return ((this.closed) || (this.pc && this.pc.iceConnectionState === 'closed'));
 }
 
 
 function setEvents() {
-  var self = this,
-    pc = this.pc;
+	var self = this,
+		pc = this.pc;
 
-  pc.onnegotiationneeded = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onnegotiationneeded = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onnegotiationneeded()');
-    if (self.onnegotiationneeded) {
-      self.onnegotiationneeded(event);
-    }
-  };
+		debug('onnegotiationneeded()');
+		if (self.onnegotiationneeded) {
+			self.onnegotiationneeded(event);
+		}
+	};
 
-  pc.onicecandidate = function (event) {
-    var candidate, isRelay, newCandidate;
+	pc.onicecandidate = function (event) {
+		var candidate, isRelay, newCandidate;
 
-    if (isClosed.call(self)) {
-      return;
-    }
-    if (self.ignoreIceGathering) {
-      return;
-    }
+		if (isClosed.call(self)) {
+			return;
+		}
+		if (self.ignoreIceGathering) {
+			return;
+		}
 
-    // Ignore any candidate (event the null one) if iceTransports:'none' is set.
-    if (self.options.iceTransportsNone) {
-      return;
-    }
+		// Ignore any candidate (event the null one) if iceTransports:'none' is set.
+		if (self.options.iceTransportsNone) {
+			return;
+		}
 
-    candidate = event.candidate;
+		candidate = event.candidate;
 
-    if (candidate) {
-      isRelay = C.REGEXP_RELAY_CANDIDATE.test(candidate.candidate);
+		if (candidate) {
+			isRelay = C.REGEXP_RELAY_CANDIDATE.test(candidate.candidate);
 
-      // Ignore if just relay candidates are requested.
-      if (self.options.iceTransportsRelay && !isRelay) {
-        return;
-      }
+			// Ignore if just relay candidates are requested.
+			if (self.options.iceTransportsRelay && !isRelay) {
+				return;
+			}
 
-      // Handle gatheringTimeoutAfterRelay.
-      if (isRelay && !self.timerGatheringTimeoutAfterRelay &&
-        (typeof self.options.gatheringTimeoutAfterRelay === 'number')) {
-        debug('onicecandidate() | first relay candidate found, ending gathering in %d ms', self.options.gatheringTimeoutAfterRelay);
+			// Handle gatheringTimeoutAfterRelay.
+			if (isRelay && !self.timerGatheringTimeoutAfterRelay &&
+				(typeof self.options.gatheringTimeoutAfterRelay === 'number')) {
+				debug('onicecandidate() | first relay candidate found, ending gathering in %d ms', self.options.gatheringTimeoutAfterRelay);
 
-        self.timerGatheringTimeoutAfterRelay = setTimeout(function () {
-          if (isClosed.call(self)) {
-            return;
-          }
+				self.timerGatheringTimeoutAfterRelay = setTimeout(function () {
+					if (isClosed.call(self)) {
+						return;
+					}
 
-          debug('forced end of candidates after timeout');
+					debug('forced end of candidates after timeout');
 
-          // Clear gathering timers.
-          delete self.timerGatheringTimeoutAfterRelay;
-          clearTimeout(self.timerGatheringTimeout);
-          delete self.timerGatheringTimeout;
+					// Clear gathering timers.
+					delete self.timerGatheringTimeoutAfterRelay;
+					clearTimeout(self.timerGatheringTimeout);
+					delete self.timerGatheringTimeout;
 
-          // Ignore new candidates.
-          self.ignoreIceGathering = true;
-          if (self.onicecandidate) {
-            self.onicecandidate({candidate: null}, null);
-          }
-        }, self.options.gatheringTimeoutAfterRelay);
-      }
+					// Ignore new candidates.
+					self.ignoreIceGathering = true;
+					if (self.onicecandidate) {
+						self.onicecandidate({candidate: null}, null);
+					}
+				}, self.options.gatheringTimeoutAfterRelay);
+			}
 
-      newCandidate = new Adapter.RTCIceCandidate({
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-        candidate: candidate.candidate
-      });
+			newCandidate = new Adapter.RTCIceCandidate({
+				sdpMid: candidate.sdpMid,
+				sdpMLineIndex: candidate.sdpMLineIndex,
+				candidate: candidate.candidate
+			});
 
-      // Force correct candidate syntax (just check it once).
-      if (VAR.normalizeCandidate === null) {
-        if (C.REGEXP_NORMALIZED_CANDIDATE.test(candidate.candidate)) {
-          VAR.normalizeCandidate = false;
-        } else {
-          debug('onicecandidate() | normalizing ICE candidates syntax (remove "a=" and "\\r\\n")');
-          VAR.normalizeCandidate = true;
-        }
-      }
-      if (VAR.normalizeCandidate) {
-        newCandidate.candidate = candidate.candidate.replace(C.REGEXP_FIX_CANDIDATE, '');
-      }
+			// Force correct candidate syntax (just check it once).
+			if (VAR.normalizeCandidate === null) {
+				if (C.REGEXP_NORMALIZED_CANDIDATE.test(candidate.candidate)) {
+					VAR.normalizeCandidate = false;
+				} else {
+					debug('onicecandidate() | normalizing ICE candidates syntax (remove "a=" and "\\r\\n")');
+					VAR.normalizeCandidate = true;
+				}
+			}
+			if (VAR.normalizeCandidate) {
+				newCandidate.candidate = candidate.candidate.replace(C.REGEXP_FIX_CANDIDATE, '');
+			}
 
-      debug(
-        'onicecandidate() | m%d(%s) %s',
-        newCandidate.sdpMLineIndex,
-        newCandidate.sdpMid || 'no mid', newCandidate.candidate);
-      if (self.onicecandidate) {
-        self.onicecandidate(event, newCandidate);
-      }
-    // Null candidate (end of candidates).
-    } else {
-      debug('onicecandidate() | end of candidates');
+			debug(
+				'onicecandidate() | m%d(%s) %s',
+				newCandidate.sdpMLineIndex,
+				newCandidate.sdpMid || 'no mid', newCandidate.candidate);
+			if (self.onicecandidate) {
+				self.onicecandidate(event, newCandidate);
+			}
+		// Null candidate (end of candidates).
+		} else {
+			debug('onicecandidate() | end of candidates');
 
-      // Clear gathering timers.
-      clearTimeout(self.timerGatheringTimeout);
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
-      if (self.onicecandidate) {
-        self.onicecandidate(event, null);
-      }
-    }
-  };
+			// Clear gathering timers.
+			clearTimeout(self.timerGatheringTimeout);
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
+			if (self.onicecandidate) {
+				self.onicecandidate(event, null);
+			}
+		}
+	};
 
-  pc.onaddstream = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onaddstream = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onaddstream() | stream: %o', event.stream);
-    if (self.onaddstream) {
-      self.onaddstream(event, event.stream);
-    }
-  };
+		debug('onaddstream() | stream: %o', event.stream);
+		if (self.onaddstream) {
+			self.onaddstream(event, event.stream);
+		}
+	};
 
-  pc.onremovestream = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onremovestream = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onremovestream() | stream: %o', event.stream);
-    if (self.onremovestream) {
-      self.onremovestream(event, event.stream);
-    }
-  };
+		debug('onremovestream() | stream: %o', event.stream);
+		if (self.onremovestream) {
+			self.onremovestream(event, event.stream);
+		}
+	};
 
-  pc.ondatachannel = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.ondatachannel = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('ondatachannel() | datachannel: %o', event.channel);
-    if (self.ondatachannel) {
-      self.ondatachannel(event, event.channel);
-    }
-  };
+		debug('ondatachannel() | datachannel: %o', event.channel);
+		if (self.ondatachannel) {
+			self.ondatachannel(event, event.channel);
+		}
+	};
 
-  pc.onsignalingstatechange = function (event) {
-    if (pc.signalingState === self.ourSignalingState) {
-      return;
-    }
+	pc.onsignalingstatechange = function (event) {
+		if (pc.signalingState === self.ourSignalingState) {
+			return;
+		}
 
-    debug('onsignalingstatechange() | signalingState: %s', pc.signalingState);
-    self.ourSignalingState = pc.signalingState;
-    if (self.onsignalingstatechange) {
-      self.onsignalingstatechange(event, pc.signalingState);
-    }
-  };
+		debug('onsignalingstatechange() | signalingState: %s', pc.signalingState);
+		self.ourSignalingState = pc.signalingState;
+		if (self.onsignalingstatechange) {
+			self.onsignalingstatechange(event, pc.signalingState);
+		}
+	};
 
-  pc.oniceconnectionstatechange = function (event) {
-    if (pc.iceConnectionState === self.ourIceConnectionState) {
-      return;
-    }
+	pc.oniceconnectionstatechange = function (event) {
+		if (pc.iceConnectionState === self.ourIceConnectionState) {
+			return;
+		}
 
-    debug('oniceconnectionstatechange() | iceConnectionState: %s', pc.iceConnectionState);
-    self.ourIceConnectionState = pc.iceConnectionState;
-    if (self.oniceconnectionstatechange) {
-      self.oniceconnectionstatechange(event, pc.iceConnectionState);
-    }
-  };
+		debug('oniceconnectionstatechange() | iceConnectionState: %s', pc.iceConnectionState);
+		self.ourIceConnectionState = pc.iceConnectionState;
+		if (self.oniceconnectionstatechange) {
+			self.oniceconnectionstatechange(event, pc.iceConnectionState);
+		}
+	};
 
-  pc.onicegatheringstatechange = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onicegatheringstatechange = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    if (pc.iceGatheringState === self.ourIceGatheringState) {
-      return;
-    }
+		if (pc.iceGatheringState === self.ourIceGatheringState) {
+			return;
+		}
 
-    debug('onicegatheringstatechange() | iceGatheringState: %s', pc.iceGatheringState);
-    self.ourIceGatheringState = pc.iceGatheringState;
-    if (self.onicegatheringstatechange) {
-      self.onicegatheringstatechange(event, pc.iceGatheringState);
-    }
-  };
+		debug('onicegatheringstatechange() | iceGatheringState: %s', pc.iceGatheringState);
+		self.ourIceGatheringState = pc.iceGatheringState;
+		if (self.onicegatheringstatechange) {
+			self.onicegatheringstatechange(event, pc.iceGatheringState);
+		}
+	};
 
-  pc.onidentityresult = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onidentityresult = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onidentityresult()');
-    if (self.onidentityresult) {
-      self.onidentityresult(event);
-    }
-  };
+		debug('onidentityresult()');
+		if (self.onidentityresult) {
+			self.onidentityresult(event);
+		}
+	};
 
-  pc.onpeeridentity = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onpeeridentity = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onpeeridentity()');
-    if (self.onpeeridentity) {
-      self.onpeeridentity(event);
-    }
-  };
+		debug('onpeeridentity()');
+		if (self.onpeeridentity) {
+			self.onpeeridentity(event);
+		}
+	};
 
-  pc.onidpassertionerror = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onidpassertionerror = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onidpassertionerror()');
-    if (self.onidpassertionerror) {
-      self.onidpassertionerror(event);
-    }
-  };
+		debug('onidpassertionerror()');
+		if (self.onidpassertionerror) {
+			self.onidpassertionerror(event);
+		}
+	};
 
-  pc.onidpvalidationerror = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
+	pc.onidpvalidationerror = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
 
-    debug('onidpvalidationerror()');
-    if (self.onidpvalidationerror) {
-      self.onidpvalidationerror(event);
-    }
-  };
+		debug('onidpvalidationerror()');
+		if (self.onidpvalidationerror) {
+			self.onidpvalidationerror(event);
+		}
+	};
 }
 
 
 function setPeerConnection() {
-  // Create a RTCPeerConnection.
-  if (!this.pcConstraints) {
-    this.pc = new Adapter.RTCPeerConnection(this.pcConfig);
-  } else {
-    // NOTE: Deprecated.
-    this.pc = new Adapter.RTCPeerConnection(this.pcConfig, this.pcConstraints);
-  }
+	// Create a RTCPeerConnection.
+	if (!this.pcConstraints) {
+		this.pc = new Adapter.RTCPeerConnection(this.pcConfig);
+	} else {
+		// NOTE: Deprecated.
+		this.pc = new Adapter.RTCPeerConnection(this.pcConfig, this.pcConstraints);
+	}
 
-  // Set RTC events.
-  setEvents.call(this);
+	// Set RTC events.
+	setEvents.call(this);
 }
 
 
 function getLocalDescription() {
-  var pc = this.pc,
-    options = this.options,
-    sdp = null;
+	var pc = this.pc,
+		options = this.options,
+		sdp = null;
 
-  if (!pc.localDescription) {
-    this.ourLocalDescription = null;
-    return null;
-  }
+	if (!pc.localDescription) {
+		this.ourLocalDescription = null;
+		return null;
+	}
 
-  // Mangle the SDP string.
-  if (options.iceTransportsRelay) {
-    sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_NON_RELAY_CANDIDATES, '');
-  } else if (options.iceTransportsNone) {
-    sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_CANDIDATES, '');
-  }
+	// Mangle the SDP string.
+	if (options.iceTransportsRelay) {
+		sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_NON_RELAY_CANDIDATES, '');
+	} else if (options.iceTransportsNone) {
+		sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_CANDIDATES, '');
+	}
 
-  this.ourLocalDescription = new Adapter.RTCSessionDescription({
-    type: pc.localDescription.type,
-    sdp: sdp || pc.localDescription.sdp
-  });
+	this.ourLocalDescription = new Adapter.RTCSessionDescription({
+		type: pc.localDescription.type,
+		sdp: sdp || pc.localDescription.sdp
+	});
 
-  return this.ourLocalDescription;
+	return this.ourLocalDescription;
 }
 
 
 function setProperties() {
-  var self = this;
+	var self = this;
 
-  Object.defineProperties(this, {
-    peerConnection: {
-      get: function () {
-        return self.pc;
-      }
-    },
+	Object.defineProperties(this, {
+		peerConnection: {
+			get: function () {
+				return self.pc;
+			}
+		},
 
-    signalingState: {
-      get: function () {
-        return self.pc.signalingState;
-      }
-    },
+		signalingState: {
+			get: function () {
+				return self.pc.signalingState;
+			}
+		},
 
-    iceConnectionState: {
-      get: function () {
-        return self.pc.iceConnectionState;
-      }
-    },
+		iceConnectionState: {
+			get: function () {
+				return self.pc.iceConnectionState;
+			}
+		},
 
-    iceGatheringState: {
-      get: function () {
-        return self.pc.iceGatheringState;
-      }
-    },
+		iceGatheringState: {
+			get: function () {
+				return self.pc.iceGatheringState;
+			}
+		},
 
-    localDescription: {
-      get: function () {
-        return getLocalDescription.call(self);
-      }
-    },
+		localDescription: {
+			get: function () {
+				return getLocalDescription.call(self);
+			}
+		},
 
-    remoteDescription: {
-      get: function () {
-        return self.pc.remoteDescription;
-      }
-    },
+		remoteDescription: {
+			get: function () {
+				return self.pc.remoteDescription;
+			}
+		},
 
-    peerIdentity: {
-      get: function () {
-        return self.pc.peerIdentity;
-      }
-    }
-  });
+		peerIdentity: {
+			get: function () {
+				return self.pc.peerIdentity;
+			}
+		}
+	});
 }
 
-},{"./Adapter":36,"debug":33,"merge":41}],38:[function(require,module,exports){
+},{"./Adapter":41,"debug":46,"merge":49}],43:[function(require,module,exports){
 'use strict';
 
 module.exports = rtcninja;
@@ -23972,51 +24617,52 @@ module.exports = rtcninja;
 // Dependencies.
 
 var browser = require('bowser'),
-  debug = require('debug')('rtcninja'),
-  debugerror = require('debug')('rtcninja:ERROR'),
-  version = require('./version'),
-  Adapter = require('./Adapter'),
-  RTCPeerConnection = require('./RTCPeerConnection'),
+	debug = require('debug')('rtcninja'),
+	debugerror = require('debug')('rtcninja:ERROR'),
+	version = require('./version'),
+	Adapter = require('./Adapter'),
+	RTCPeerConnection = require('./RTCPeerConnection'),
 
-  // Internal vars.
-  called = false;
+	// Internal vars.
+	called = false;
 
 debugerror.log = console.warn.bind(console);
 debug('version %s', version);
 debug('detected browser: %s %s [mobile:%s, tablet:%s, android:%s, ios:%s]',
-    browser.name, browser.version, !!browser.mobile, !!browser.tablet,
-    !!browser.android, !!browser.ios);
+		browser.name, browser.version, !!browser.mobile, !!browser.tablet,
+		!!browser.android, !!browser.ios);
 
 
 // Constructor.
 
 function rtcninja(options) {
-  // Load adapter
-  var iface = Adapter(options || {});  // jshint ignore:line
+	// Load adapter
+	var iface = Adapter(options || {});  // jshint ignore:line
 
-  called = true;
+	called = true;
 
-  // Expose RTCPeerConnection class.
-  rtcninja.RTCPeerConnection = RTCPeerConnection;
+	// Expose RTCPeerConnection class.
+	rtcninja.RTCPeerConnection = RTCPeerConnection;
 
-  // Expose WebRTC API and utils.
-  rtcninja.getUserMedia = iface.getUserMedia;
-  rtcninja.RTCSessionDescription = iface.RTCSessionDescription;
-  rtcninja.RTCIceCandidate = iface.RTCIceCandidate;
-  rtcninja.MediaStreamTrack = iface.MediaStreamTrack;
-  rtcninja.getMediaDevices = iface.getMediaDevices;
-  rtcninja.attachMediaStream = iface.attachMediaStream;
-  rtcninja.closeMediaStream = iface.closeMediaStream;
-  rtcninja.canRenegotiate = iface.canRenegotiate;
+	// Expose WebRTC API and utils.
+	rtcninja.getUserMedia = iface.getUserMedia;
+	rtcninja.mediaDevices = iface.mediaDevices;
+	rtcninja.RTCSessionDescription = iface.RTCSessionDescription;
+	rtcninja.RTCIceCandidate = iface.RTCIceCandidate;
+	rtcninja.MediaStreamTrack = iface.MediaStreamTrack;
+	rtcninja.getMediaDevices = iface.getMediaDevices;
+	rtcninja.attachMediaStream = iface.attachMediaStream;
+	rtcninja.closeMediaStream = iface.closeMediaStream;
+	rtcninja.canRenegotiate = iface.canRenegotiate;
 
-  // Log WebRTC support.
-  if (iface.hasWebRTC()) {
-    debug('WebRTC supported');
-    return true;
-  } else {
-    debugerror('WebRTC not supported');
-    return false;
-  }
+	// Log WebRTC support.
+	if (iface.hasWebRTC()) {
+		debug('WebRTC supported');
+		return true;
+	} else {
+		debugerror('WebRTC not supported');
+		return false;
+	}
 }
 
 
@@ -24024,27 +24670,27 @@ function rtcninja(options) {
 
 // If called without calling rtcninja(), call it.
 rtcninja.hasWebRTC = function () {
-  if (!called) {
-    rtcninja();
-  }
+	if (!called) {
+		rtcninja();
+	}
 
-  return Adapter.hasWebRTC();
+	return Adapter.hasWebRTC();
 };
 
 
 // Expose version property.
 Object.defineProperty(rtcninja, 'version', {
-  get: function () {
-    return version;
-  }
+	get: function () {
+		return version;
+	}
 });
 
 
 // Expose called property.
 Object.defineProperty(rtcninja, 'called', {
-  get: function () {
-    return called;
-  }
+	get: function () {
+		return called;
+	}
 });
 
 
@@ -24053,14 +24699,14 @@ Object.defineProperty(rtcninja, 'called', {
 rtcninja.debug = require('debug');
 rtcninja.browser = browser;
 
-},{"./Adapter":36,"./RTCPeerConnection":37,"./version":39,"bowser":40,"debug":33}],39:[function(require,module,exports){
+},{"./Adapter":41,"./RTCPeerConnection":42,"./version":44,"bowser":45,"debug":46}],44:[function(require,module,exports){
 'use strict';
 
 // Expose the 'version' field of package.json.
 module.exports = require('../package.json').version;
 
 
-},{"../package.json":42}],40:[function(require,module,exports){
+},{"../package.json":50}],45:[function(require,module,exports){
 /*!
  * Bowser - a browser detector
  * https://github.com/ded/bowser
@@ -24069,7 +24715,7 @@ module.exports = require('../package.json').version;
 
 !function (name, definition) {
   if (typeof module != 'undefined' && module.exports) module.exports = definition()
-  else if (typeof define == 'function' && define.amd) define(definition)
+  else if (typeof define == 'function' && define.amd) define(name, definition)
   else this[name] = definition()
 }('bowser', function () {
   /**
@@ -24101,6 +24747,7 @@ module.exports = require('../package.json').version;
       , tizen = /tizen/i.test(ua)
       , webos = /(web|hpw)os/i.test(ua)
       , windowsphone = /windows phone/i.test(ua)
+      , samsungBrowser = /SamsungBrowser/i.test(ua)
       , windows = !windowsphone && /windows/i.test(ua)
       , mac = !iosdevice && !silk && /macintosh/i.test(ua)
       , linux = !android && !sailfish && !tizen && !webos && /linux/i.test(ua)
@@ -24111,11 +24758,26 @@ module.exports = require('../package.json').version;
       , xbox = /xbox/i.test(ua)
       , result
 
-    if (/opera|opr|opios/i.test(ua)) {
+    if (/opera/i.test(ua)) {
+      //  an old Opera
       result = {
         name: 'Opera'
       , opera: t
       , version: versionIdentifier || getFirstMatch(/(?:opera|opr|opios)[\s\/](\d+(\.\d+)?)/i)
+      }
+    } else if (/opr|opios/i.test(ua)) {
+      // a new Opera
+      result = {
+        name: 'Opera'
+        , opera: t
+        , version: getFirstMatch(/(?:opr|opios)[\s\/](\d+(\.\d+)?)/i) || versionIdentifier
+      }
+    }
+    else if (/SamsungBrowser/i.test(ua)) {
+      result = {
+        name: 'Samsung Internet for Android'
+        , samsungBrowser: t
+        , version: versionIdentifier || getFirstMatch(/(?:SamsungBrowser)[\s\/](\d+(\.\d+)?)/i)
       }
     }
     else if (/coast/i.test(ua)) {
@@ -24433,13 +25095,15 @@ module.exports = require('../package.json').version;
     if (result.msedge ||
         (result.msie && result.version >= 10) ||
         (result.yandexbrowser && result.version >= 15) ||
-        (result.vivaldi && result.version >= 1.0) ||
+		    (result.vivaldi && result.version >= 1.0) ||
         (result.chrome && result.version >= 20) ||
+        (result.samsungBrowser && result.version >= 4) ||
         (result.firefox && result.version >= 20.0) ||
         (result.safari && result.version >= 6) ||
         (result.opera && result.version >= 10.0) ||
         (result.ios && result.osversion && result.osversion.split(".")[0] >= 6) ||
         (result.blackberry && result.version >= 10.1)
+        || (result.chromium && result.version >= 20)
         ) {
       result.a = t;
     }
@@ -24449,6 +25113,7 @@ module.exports = require('../package.json').version;
         (result.safari && result.version < 6) ||
         (result.opera && result.version < 10.0) ||
         (result.ios && result.osversion && result.osversion.split(".")[0] < 6)
+        || (result.chromium && result.version < 20)
         ) {
       result.c = t
     } else result.x = t
@@ -24456,7 +25121,7 @@ module.exports = require('../package.json').version;
     return result
   }
 
-  var bowser = detect(typeof navigator !== 'undefined' ? navigator.userAgent : '')
+  var bowser = detect(typeof navigator !== 'undefined' ? navigator.userAgent || '' : '')
 
   bowser.test = function (browserList) {
     for (var i = 0; i < browserList.length; ++i) {
@@ -24470,6 +25135,145 @@ module.exports = require('../package.json').version;
     return false;
   }
 
+  /**
+   * Get version precisions count
+   *
+   * @example
+   *   getVersionPrecision("1.10.3") // 3
+   *
+   * @param  {string} version
+   * @return {number}
+   */
+  function getVersionPrecision(version) {
+    return version.split(".").length;
+  }
+
+  /**
+   * Array::map polyfill
+   *
+   * @param  {Array} arr
+   * @param  {Function} iterator
+   * @return {Array}
+   */
+  function map(arr, iterator) {
+    var result = [], i;
+    if (Array.prototype.map) {
+      return Array.prototype.map.call(arr, iterator);
+    }
+    for (i = 0; i < arr.length; i++) {
+      result.push(iterator(arr[i]));
+    }
+    return result;
+  }
+
+  /**
+   * Calculate browser version weight
+   *
+   * @example
+   *   compareVersions(['1.10.2.1',  '1.8.2.1.90'])    // 1
+   *   compareVersions(['1.010.2.1', '1.09.2.1.90']);  // 1
+   *   compareVersions(['1.10.2.1',  '1.10.2.1']);     // 0
+   *   compareVersions(['1.10.2.1',  '1.0800.2']);     // -1
+   *
+   * @param  {Array<String>} versions versions to compare
+   * @return {Number} comparison result
+   */
+  function compareVersions(versions) {
+    // 1) get common precision for both versions, for example for "10.0" and "9" it should be 2
+    var precision = Math.max(getVersionPrecision(versions[0]), getVersionPrecision(versions[1]));
+    var chunks = map(versions, function (version) {
+      var delta = precision - getVersionPrecision(version);
+
+      // 2) "9" -> "9.0" (for precision = 2)
+      version = version + new Array(delta + 1).join(".0");
+
+      // 3) "9.0" -> ["000000000"", "000000009"]
+      return map(version.split("."), function (chunk) {
+        return new Array(20 - chunk.length).join("0") + chunk;
+      }).reverse();
+    });
+
+    // iterate in reverse order by reversed chunks array
+    while (--precision >= 0) {
+      // 4) compare: "000000009" > "000000010" = false (but "9" > "10" = true)
+      if (chunks[0][precision] > chunks[1][precision]) {
+        return 1;
+      }
+      else if (chunks[0][precision] === chunks[1][precision]) {
+        if (precision === 0) {
+          // all version chunks are same
+          return 0;
+        }
+      }
+      else {
+        return -1;
+      }
+    }
+  }
+
+  /**
+   * Check if browser is unsupported
+   *
+   * @example
+   *   bowser.isUnsupportedBrowser({
+   *     msie: "10",
+   *     firefox: "23",
+   *     chrome: "29",
+   *     safari: "5.1",
+   *     opera: "16",
+   *     phantom: "534"
+   *   });
+   *
+   * @param  {Object}  minVersions map of minimal version to browser
+   * @param  {Boolean} [strictMode = false] flag to return false if browser wasn't found in map
+   * @param  {String}  [ua] user agent string
+   * @return {Boolean}
+   */
+  function isUnsupportedBrowser(minVersions, strictMode, ua) {
+    var _bowser = bowser;
+
+    // make strictMode param optional with ua param usage
+    if (typeof strictMode === 'string') {
+      ua = strictMode;
+      strictMode = void(0);
+    }
+
+    if (strictMode === void(0)) {
+      strictMode = false;
+    }
+    if (ua) {
+      _bowser = detect(ua);
+    }
+
+    var version = "" + _bowser.version;
+    for (var browser in minVersions) {
+      if (minVersions.hasOwnProperty(browser)) {
+        if (_bowser[browser]) {
+          // browser version and min supported version.
+          return compareVersions([version, minVersions[browser]]) < 0;
+        }
+      }
+    }
+
+    return strictMode; // not found
+  }
+
+  /**
+   * Check if browser is supported
+   *
+   * @param  {Object} minVersions map of minimal version to browser
+   * @param  {Boolean} [strictMode = false] flag to return false if browser wasn't found in map
+   * @param  {String}  [ua] user agent string
+   * @return {Boolean}
+   */
+  function check(minVersions, strictMode, ua) {
+    return !isUnsupportedBrowser(minVersions, strictMode, ua);
+  }
+
+  bowser.isUnsupportedBrowser = isUnsupportedBrowser;
+  bowser.compareVersions = compareVersions;
+  bowser.check = check;
+
   /*
    * Set our detect method to the main bowser object so we can
    * reuse it to test other user agents.
@@ -24480,7 +25284,13 @@ module.exports = require('../package.json').version;
   return bowser
 });
 
-},{}],41:[function(require,module,exports){
+},{}],46:[function(require,module,exports){
+arguments[4][33][0].apply(exports,arguments)
+},{"./debug":47,"dup":33}],47:[function(require,module,exports){
+arguments[4][34][0].apply(exports,arguments)
+},{"dup":34,"ms":48}],48:[function(require,module,exports){
+arguments[4][35][0].apply(exports,arguments)
+},{"dup":35}],49:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -24492,797 +25302,217 @@ module.exports = require('../package.json').version;
 
 ;(function(isNode) {
 
-  /**
-   * Merge one or more objects
-   * @param bool? clone
-   * @param mixed,... arguments
-   * @return object
-   */
+	/**
+	 * Merge one or more objects
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
 
-  var Public = function(clone) {
+	var Public = function(clone) {
 
-    return merge(clone === true, false, arguments);
+		return merge(clone === true, false, arguments);
 
-  }, publicName = 'merge';
+	}, publicName = 'merge';
 
-  /**
-   * Merge two or more objects recursively
-   * @param bool? clone
-   * @param mixed,... arguments
-   * @return object
-   */
+	/**
+	 * Merge two or more objects recursively
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
 
-  Public.recursive = function(clone) {
+	Public.recursive = function(clone) {
 
-    return merge(clone === true, true, arguments);
+		return merge(clone === true, true, arguments);
 
-  };
+	};
 
-  /**
-   * Clone the input removing any reference
-   * @param mixed input
-   * @return mixed
-   */
+	/**
+	 * Clone the input removing any reference
+	 * @param mixed input
+	 * @return mixed
+	 */
 
-  Public.clone = function(input) {
+	Public.clone = function(input) {
 
-    var output = input,
-      type = typeOf(input),
-      index, size;
+		var output = input,
+			type = typeOf(input),
+			index, size;
 
-    if (type === 'array') {
+		if (type === 'array') {
 
-      output = [];
-      size = input.length;
+			output = [];
+			size = input.length;
 
-      for (index=0;index<size;++index)
+			for (index=0;index<size;++index)
 
-        output[index] = Public.clone(input[index]);
+				output[index] = Public.clone(input[index]);
 
-    } else if (type === 'object') {
+		} else if (type === 'object') {
 
-      output = {};
+			output = {};
 
-      for (index in input)
+			for (index in input)
 
-        output[index] = Public.clone(input[index]);
+				output[index] = Public.clone(input[index]);
 
-    }
+		}
 
-    return output;
+		return output;
 
-  };
+	};
 
-  /**
-   * Merge two objects recursively
-   * @param mixed input
-   * @param mixed extend
-   * @return mixed
-   */
+	/**
+	 * Merge two objects recursively
+	 * @param mixed input
+	 * @param mixed extend
+	 * @return mixed
+	 */
 
-  function merge_recursive(base, extend) {
+	function merge_recursive(base, extend) {
 
-    if (typeOf(base) !== 'object')
+		if (typeOf(base) !== 'object')
 
-      return extend;
+			return extend;
 
-    for (var key in extend) {
+		for (var key in extend) {
 
-      if (typeOf(base[key]) === 'object' && typeOf(extend[key]) === 'object') {
+			if (typeOf(base[key]) === 'object' && typeOf(extend[key]) === 'object') {
 
-        base[key] = merge_recursive(base[key], extend[key]);
+				base[key] = merge_recursive(base[key], extend[key]);
 
-      } else {
+			} else {
 
-        base[key] = extend[key];
+				base[key] = extend[key];
 
-      }
+			}
 
-    }
+		}
 
-    return base;
+		return base;
 
-  }
+	}
 
-  /**
-   * Merge two or more objects
-   * @param bool clone
-   * @param bool recursive
-   * @param array argv
-   * @return object
-   */
+	/**
+	 * Merge two or more objects
+	 * @param bool clone
+	 * @param bool recursive
+	 * @param array argv
+	 * @return object
+	 */
 
-  function merge(clone, recursive, argv) {
+	function merge(clone, recursive, argv) {
 
-    var result = argv[0],
-      size = argv.length;
+		var result = argv[0],
+			size = argv.length;
 
-    if (clone || typeOf(result) !== 'object')
+		if (clone || typeOf(result) !== 'object')
 
-      result = {};
+			result = {};
 
-    for (var index=0;index<size;++index) {
+		for (var index=0;index<size;++index) {
 
-      var item = argv[index],
+			var item = argv[index],
 
-        type = typeOf(item);
+				type = typeOf(item);
 
-      if (type !== 'object') continue;
+			if (type !== 'object') continue;
 
-      for (var key in item) {
+			for (var key in item) {
 
-        var sitem = clone ? Public.clone(item[key]) : item[key];
+				var sitem = clone ? Public.clone(item[key]) : item[key];
 
-        if (recursive) {
+				if (recursive) {
 
-          result[key] = merge_recursive(result[key], sitem);
+					result[key] = merge_recursive(result[key], sitem);
 
-        } else {
+				} else {
 
-          result[key] = sitem;
+					result[key] = sitem;
 
-        }
+				}
 
-      }
+			}
 
-    }
+		}
 
-    return result;
+		return result;
 
-  }
+	}
 
-  /**
-   * Get type of variable
-   * @param mixed input
-   * @return string
-   *
-   * @see http://jsperf.com/typeofvar
-   */
+	/**
+	 * Get type of variable
+	 * @param mixed input
+	 * @return string
+	 *
+	 * @see http://jsperf.com/typeofvar
+	 */
 
-  function typeOf(input) {
+	function typeOf(input) {
 
-    return ({}).toString.call(input).slice(8, -1).toLowerCase();
+		return ({}).toString.call(input).slice(8, -1).toLowerCase();
 
-  }
+	}
 
-  if (isNode) {
+	if (isNode) {
 
-    module.exports = Public;
+		module.exports = Public;
 
-  } else {
+	} else {
 
-    window[publicName] = Public;
+		window[publicName] = Public;
 
-  }
+	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],42:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 module.exports={
   "name": "rtcninja",
-  "version": "0.6.7",
+  "version": "0.7.0",
   "description": "WebRTC API wrapper to deal with different browsers",
-  "author": {
-    "name": "Iñaki Baz Castillo",
-    "email": "inaki.baz@eface2face.com",
-    "url": "http://eface2face.com"
-  },
+  "author": "Iñaki Baz Castillo <inaki.baz@eface2face.com> (http://eface2face.com)",
   "contributors": [
-    {
-      "name": "Jesús Pérez",
-      "email": "jesus.perez@eface2face.com"
-    }
+    "Jesús Pérez <jesus.perez@eface2face.com>"
   ],
   "license": "MIT",
   "main": "lib/rtcninja.js",
   "homepage": "https://github.com/eface2face/rtcninja.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/eface2face/rtcninja.js.git"
+    "url": "https://github.com/eface2face/rtcninja.js.git"
   },
   "keywords": [
     "webrtc"
   ],
   "engines": {
-    "node": ">=0.10.32"
+    "node": ">=0.12.0"
   },
   "dependencies": {
-    "bowser": "^1.2.0",
+    "bowser": "^1.4.6",
     "debug": "^2.2.0",
     "merge": "^1.2.0"
   },
   "devDependencies": {
-    "browserify": "^13.0.1",
+    "browserify": "^13.1.0",
     "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
     "gulp-expect-file": "0.0.7",
     "gulp-filelog": "^0.4.1",
-    "gulp-header": "^1.8.2",
+    "gulp-header": "^1.8.8",
     "gulp-jscs": "^3.0.2",
     "gulp-jscs-stylish": "^1.4.0",
     "gulp-jshint": "^2.0.1",
     "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.5.3",
-    "jshint-stylish": "^2.2.0",
+    "gulp-uglify": "^1.5.4",
+    "jshint": "^2.9.3",
+    "jshint-stylish": "^2.2.1",
     "vinyl-source-stream": "^1.1.0"
-  },
-  "gitHead": "d36b02d0503ca152771692935a4096130f28dc5d",
-  "bugs": {
-    "url": "https://github.com/eface2face/rtcninja.js/issues"
-  },
-  "_id": "rtcninja@0.6.7",
-  "scripts": {},
-  "_shasum": "f7c8855f2c0e41ae08c638375bad1dc977369ec2",
-  "_from": "rtcninja@>=0.6.7 <0.7.0",
-  "_npmVersion": "2.14.20",
-  "_nodeVersion": "4.4.1",
-  "_npmUser": {
-    "name": "ibc",
-    "email": "ibc@aliax.net"
-  },
-  "dist": {
-    "shasum": "f7c8855f2c0e41ae08c638375bad1dc977369ec2",
-    "tarball": "https://registry.npmjs.org/rtcninja/-/rtcninja-0.6.7.tgz"
-  },
-  "maintainers": [
-    {
-      "name": "ibc",
-      "email": "ibc@aliax.net"
-    }
-  ],
-  "_npmOperationalInternal": {
-    "host": "packages-16-east.internal.npmjs.com",
-    "tmp": "tmp/rtcninja-0.6.7.tgz_1464431140092_0.9943081210367382"
-  },
-  "directories": {},
-  "_resolved": "https://registry.npmjs.org/rtcninja/-/rtcninja-0.6.7.tgz"
-}
-
-},{}],43:[function(require,module,exports){
-var grammar = module.exports = {
-  v: [{
-      name: 'version',
-      reg: /^(\d*)$/
-  }],
-  o: [{ //o=- 20518 0 IN IP4 203.0.113.1
-    // NB: sessionId will be a String in most cases because it is huge
-    name: 'origin',
-    reg: /^(\S*) (\d*) (\d*) (\S*) IP(\d) (\S*)/,
-    names: ['username', 'sessionId', 'sessionVersion', 'netType', 'ipVer', 'address'],
-    format: "%s %s %d %s IP%d %s"
-  }],
-  // default parsing of these only (though some of these feel outdated)
-  s: [{ name: 'name' }],
-  i: [{ name: 'description' }],
-  u: [{ name: 'uri' }],
-  e: [{ name: 'email' }],
-  p: [{ name: 'phone' }],
-  z: [{ name: 'timezones' }], // TODO: this one can actually be parsed properly..
-  r: [{ name: 'repeats' }],   // TODO: this one can also be parsed properly
-  //k: [{}], // outdated thing ignored
-  t: [{ //t=0 0
-    name: 'timing',
-    reg: /^(\d*) (\d*)/,
-    names: ['start', 'stop'],
-    format: "%d %d"
-  }],
-  c: [{ //c=IN IP4 10.47.197.26
-      name: 'connection',
-      reg: /^IN IP(\d) (\S*)/,
-      names: ['version', 'ip'],
-      format: "IN IP%d %s"
-  }],
-  b: [{ //b=AS:4000
-      push: 'bandwidth',
-      reg: /^(TIAS|AS|CT|RR|RS):(\d*)/,
-      names: ['type', 'limit'],
-      format: "%s:%s"
-  }],
-  m: [{ //m=video 51744 RTP/AVP 126 97 98 34 31
-      // NB: special - pushes to session
-      // TODO: rtp/fmtp should be filtered by the payloads found here?
-      reg: /^(\w*) (\d*) ([\w\/]*)(?: (.*))?/,
-      names: ['type', 'port', 'protocol', 'payloads'],
-      format: "%s %d %s %s"
-  }],
-  a: [
-    { //a=rtpmap:110 opus/48000/2
-      push: 'rtp',
-      reg: /^rtpmap:(\d*) ([\w\-\.]*)(?:\s*\/(\d*)(?:\s*\/(\S*))?)?/,
-      names: ['payload', 'codec', 'rate', 'encoding'],
-      format: function (o) {
-        return (o.encoding) ?
-          "rtpmap:%d %s/%s/%s":
-          o.rate ?
-          "rtpmap:%d %s/%s":
-          "rtpmap:%d %s";
-      }
-    },
-    {
-      //a=fmtp:108 profile-level-id=24;object=23;bitrate=64000
-      //a=fmtp:111 minptime=10; useinbandfec=1
-      push: 'fmtp',
-      reg: /^fmtp:(\d*) ([\S| ]*)/,
-      names: ['payload', 'config'],
-      format: "fmtp:%d %s"
-    },
-    { //a=control:streamid=0
-        name: 'control',
-        reg: /^control:(.*)/,
-        format: "control:%s"
-    },
-    { //a=rtcp:65179 IN IP4 193.84.77.194
-      name: 'rtcp',
-      reg: /^rtcp:(\d*)(?: (\S*) IP(\d) (\S*))?/,
-      names: ['port', 'netType', 'ipVer', 'address'],
-      format: function (o) {
-        return (o.address != null) ?
-          "rtcp:%d %s IP%d %s":
-          "rtcp:%d";
-      }
-    },
-    { //a=rtcp-fb:98 trr-int 100
-      push: 'rtcpFbTrrInt',
-      reg: /^rtcp-fb:(\*|\d*) trr-int (\d*)/,
-      names: ['payload', 'value'],
-      format: "rtcp-fb:%d trr-int %d"
-    },
-    { //a=rtcp-fb:98 nack rpsi
-      push: 'rtcpFb',
-      reg: /^rtcp-fb:(\*|\d*) ([\w-_]*)(?: ([\w-_]*))?/,
-      names: ['payload', 'type', 'subtype'],
-      format: function (o) {
-        return (o.subtype != null) ?
-          "rtcp-fb:%s %s %s":
-          "rtcp-fb:%s %s";
-      }
-    },
-    { //a=extmap:2 urn:ietf:params:rtp-hdrext:toffset
-      //a=extmap:1/recvonly URI-gps-string
-      push: 'ext',
-      reg: /^extmap:([\w_\/]*) (\S*)(?: (\S*))?/,
-      names: ['value', 'uri', 'config'], // value may include "/direction" suffix
-      format: function (o) {
-        return (o.config != null) ?
-          "extmap:%s %s %s":
-          "extmap:%s %s";
-      }
-    },
-    {
-      //a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:PS1uQCVeeCFCanVmcjkpPywjNWhcYD0mXXtxaVBR|2^20|1:32
-      push: 'crypto',
-      reg: /^crypto:(\d*) ([\w_]*) (\S*)(?: (\S*))?/,
-      names: ['id', 'suite', 'config', 'sessionConfig'],
-      format: function (o) {
-        return (o.sessionConfig != null) ?
-          "crypto:%d %s %s %s":
-          "crypto:%d %s %s";
-      }
-    },
-    { //a=setup:actpass
-      name: 'setup',
-      reg: /^setup:(\w*)/,
-      format: "setup:%s"
-    },
-    { //a=mid:1
-      name: 'mid',
-      reg: /^mid:([^\s]*)/,
-      format: "mid:%s"
-    },
-    { //a=msid:0c8b064d-d807-43b4-b434-f92a889d8587 98178685-d409-46e0-8e16-7ef0db0db64a
-      name: 'msid',
-      reg: /^msid:(.*)/,
-      format: "msid:%s"
-    },
-    { //a=ptime:20
-      name: 'ptime',
-      reg: /^ptime:(\d*)/,
-      format: "ptime:%d"
-    },
-    { //a=maxptime:60
-      name: 'maxptime',
-      reg: /^maxptime:(\d*)/,
-      format: "maxptime:%d"
-    },
-    { //a=sendrecv
-      name: 'direction',
-      reg: /^(sendrecv|recvonly|sendonly|inactive)/
-    },
-    { //a=ice-lite
-      name: 'icelite',
-      reg: /^(ice-lite)/
-    },
-    { //a=ice-ufrag:F7gI
-      name: 'iceUfrag',
-      reg: /^ice-ufrag:(\S*)/,
-      format: "ice-ufrag:%s"
-    },
-    { //a=ice-pwd:x9cml/YzichV2+XlhiMu8g
-      name: 'icePwd',
-      reg: /^ice-pwd:(\S*)/,
-      format: "ice-pwd:%s"
-    },
-    { //a=fingerprint:SHA-1 00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33
-      name: 'fingerprint',
-      reg: /^fingerprint:(\S*) (\S*)/,
-      names: ['type', 'hash'],
-      format: "fingerprint:%s %s"
-    },
-    {
-      //a=candidate:0 1 UDP 2113667327 203.0.113.1 54400 typ host
-      //a=candidate:1162875081 1 udp 2113937151 192.168.34.75 60017 typ host generation 0
-      //a=candidate:3289912957 2 udp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 generation 0
-      //a=candidate:229815620 1 tcp 1518280447 192.168.150.19 60017 typ host tcptype active generation 0
-      //a=candidate:3289912957 2 tcp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 tcptype passive generation 0
-      push:'candidates',
-      reg: /^candidate:(\S*) (\d*) (\S*) (\d*) (\S*) (\d*) typ (\S*)(?: raddr (\S*) rport (\d*))?(?: tcptype (\S*))?(?: generation (\d*))?/,
-      names: ['foundation', 'component', 'transport', 'priority', 'ip', 'port', 'type', 'raddr', 'rport', 'tcptype', 'generation'],
-      format: function (o) {
-        var str = "candidate:%s %d %s %d %s %d typ %s";
-
-        str += (o.raddr != null) ? " raddr %s rport %d" : "%v%v";
-
-        // NB: candidate has three optional chunks, so %void middles one if it's missing
-        str += (o.tcptype != null) ? " tcptype %s" : "%v";
-
-        if (o.generation != null) {
-          str += " generation %d";
-        }
-        return str;
-      }
-    },
-    { //a=end-of-candidates (keep after the candidates line for readability)
-      name: 'endOfCandidates',
-      reg: /^(end-of-candidates)/
-    },
-    { //a=remote-candidates:1 203.0.113.1 54400 2 203.0.113.1 54401 ...
-      name: 'remoteCandidates',
-      reg: /^remote-candidates:(.*)/,
-      format: "remote-candidates:%s"
-    },
-    { //a=ice-options:google-ice
-      name: 'iceOptions',
-      reg: /^ice-options:(\S*)/,
-      format: "ice-options:%s"
-    },
-    { //a=ssrc:2566107569 cname:t9YU8M1UxTF8Y1A1
-      push: "ssrcs",
-      reg: /^ssrc:(\d*) ([\w_]*):(.*)/,
-      names: ['id', 'attribute', 'value'],
-      format: "ssrc:%d %s:%s"
-    },
-    { //a=ssrc-group:FEC 1 2
-      push: "ssrcGroups",
-      reg: /^ssrc-group:(\w*) (.*)/,
-      names: ['semantics', 'ssrcs'],
-      format: "ssrc-group:%s %s"
-    },
-    { //a=msid-semantic: WMS Jvlam5X3SX1OP6pn20zWogvaKJz5Hjf9OnlV
-      name: "msidSemantic",
-      reg: /^msid-semantic:\s?(\w*) (\S*)/,
-      names: ['semantic', 'token'],
-      format: "msid-semantic: %s %s" // space after ":" is not accidental
-    },
-    { //a=group:BUNDLE audio video
-      push: 'groups',
-      reg: /^group:(\w*) (.*)/,
-      names: ['type', 'mids'],
-      format: "group:%s %s"
-    },
-    { //a=rtcp-mux
-      name: 'rtcpMux',
-      reg: /^(rtcp-mux)/
-    },
-    { //a=rtcp-rsize
-      name: 'rtcpRsize',
-      reg: /^(rtcp-rsize)/
-    },
-    { //a=sctpmap:5000 webrtc-datachannel 1024
-      name: 'sctpmap',
-      reg: /^sctpmap:([\w_\/]*) (\S*)(?: (\S*))?/,
-      names: ['sctpmapNumber', 'app', 'maxMessageSize'],
-      format: function (o) {
-        return (o.maxMessageSize != null) ?
-          "sctpmap:%s %s %s" :
-          "sctpmap:%s %s";
-      }
-    },
-    { // any a= that we don't understand is kepts verbatim on media.invalid
-      push: 'invalid',
-      names: ["value"]
-    }
-  ]
-};
-
-// set sensible defaults to avoid polluting the grammar with boring details
-Object.keys(grammar).forEach(function (key) {
-  var objs = grammar[key];
-  objs.forEach(function (obj) {
-    if (!obj.reg) {
-      obj.reg = /(.*)/;
-    }
-    if (!obj.format) {
-      obj.format = "%s";
-    }
-  });
-});
-
-},{}],44:[function(require,module,exports){
-var parser = require('./parser');
-var writer = require('./writer');
-
-exports.write = writer;
-exports.parse = parser.parse;
-exports.parseFmtpConfig = parser.parseFmtpConfig;
-exports.parsePayloads = parser.parsePayloads;
-exports.parseRemoteCandidates = parser.parseRemoteCandidates;
-
-},{"./parser":45,"./writer":46}],45:[function(require,module,exports){
-var toIntIfInt = function (v) {
-  return String(Number(v)) === v ? Number(v) : v;
-};
-
-var attachProperties = function (match, location, names, rawName) {
-  if (rawName && !names) {
-    location[rawName] = toIntIfInt(match[1]);
-  }
-  else {
-    for (var i = 0; i < names.length; i += 1) {
-      if (match[i+1] != null) {
-        location[names[i]] = toIntIfInt(match[i+1]);
-      }
-    }
-  }
-};
-
-var parseReg = function (obj, location, content) {
-  var needsBlank = obj.name && obj.names;
-  if (obj.push && !location[obj.push]) {
-    location[obj.push] = [];
-  }
-  else if (needsBlank && !location[obj.name]) {
-    location[obj.name] = {};
-  }
-  var keyLocation = obj.push ?
-    {} :  // blank object that will be pushed
-    needsBlank ? location[obj.name] : location; // otherwise, named location or root
-
-  attachProperties(content.match(obj.reg), keyLocation, obj.names, obj.name);
-
-  if (obj.push) {
-    location[obj.push].push(keyLocation);
-  }
-};
-
-var grammar = require('./grammar');
-var validLine = RegExp.prototype.test.bind(/^([a-z])=(.*)/);
-
-exports.parse = function (sdp) {
-  var session = {}
-    , media = []
-    , location = session; // points at where properties go under (one of the above)
-
-  // parse lines we understand
-  sdp.split(/(\r\n|\r|\n)/).filter(validLine).forEach(function (l) {
-    var type = l[0];
-    var content = l.slice(2);
-    if (type === 'm') {
-      media.push({rtp: [], fmtp: []});
-      location = media[media.length-1]; // point at latest media line
-    }
-
-    for (var j = 0; j < (grammar[type] || []).length; j += 1) {
-      var obj = grammar[type][j];
-      if (obj.reg.test(content)) {
-        return parseReg(obj, location, content);
-      }
-    }
-  });
-
-  session.media = media; // link it up
-  return session;
-};
-
-var fmtpReducer = function (acc, expr) {
-  var s = expr.split(/=(.+)/, 2);
-  if (s.length === 2) {
-    acc[s[0]] = toIntIfInt(s[1]);
-  }
-  return acc;
-};
-
-exports.parseFmtpConfig = function (str) {
-  return str.split(/\;\s?/).reduce(fmtpReducer, {});
-};
-
-exports.parsePayloads = function (str) {
-  return str.split(' ').map(Number);
-};
-
-exports.parseRemoteCandidates = function (str) {
-  var candidates = [];
-  var parts = str.split(' ').map(toIntIfInt);
-  for (var i = 0; i < parts.length; i += 3) {
-    candidates.push({
-      component: parts[i],
-      ip: parts[i + 1],
-      port: parts[i + 2]
-    });
-  }
-  return candidates;
-};
-
-},{"./grammar":43}],46:[function(require,module,exports){
-var grammar = require('./grammar');
-
-// customized util.format - discards excess arguments and can void middle ones
-var formatRegExp = /%[sdv%]/g;
-var format = function (formatStr) {
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  return formatStr.replace(formatRegExp, function (x) {
-    if (i >= len) {
-      return x; // missing argument
-    }
-    var arg = args[i];
-    i += 1;
-    switch (x) {
-      case '%%':
-        return '%';
-      case '%s':
-        return String(arg);
-      case '%d':
-        return Number(arg);
-      case '%v':
-        return '';
-    }
-  });
-  // NB: we discard excess arguments - they are typically undefined from makeLine
-};
-
-var makeLine = function (type, obj, location) {
-  var str = obj.format instanceof Function ?
-    (obj.format(obj.push ? location : location[obj.name])) :
-    obj.format;
-
-  var args = [type + '=' + str];
-  if (obj.names) {
-    for (var i = 0; i < obj.names.length; i += 1) {
-      var n = obj.names[i];
-      if (obj.name) {
-        args.push(location[obj.name][n]);
-      }
-      else { // for mLine and push attributes
-        args.push(location[obj.names[i]]);
-      }
-    }
-  }
-  else {
-    args.push(location[obj.name]);
-  }
-  return format.apply(null, args);
-};
-
-// RFC specified order
-// TODO: extend this with all the rest
-var defaultOuterOrder = [
-  'v', 'o', 's', 'i',
-  'u', 'e', 'p', 'c',
-  'b', 't', 'r', 'z', 'a'
-];
-var defaultInnerOrder = ['i', 'c', 'b', 'a'];
-
-
-module.exports = function (session, opts) {
-  opts = opts || {};
-  // ensure certain properties exist
-  if (session.version == null) {
-    session.version = 0; // "v=0" must be there (only defined version atm)
-  }
-  if (session.name == null) {
-    session.name = " "; // "s= " must be there if no meaningful name set
-  }
-  session.media.forEach(function (mLine) {
-    if (mLine.payloads == null) {
-      mLine.payloads = "";
-    }
-  });
-
-  var outerOrder = opts.outerOrder || defaultOuterOrder;
-  var innerOrder = opts.innerOrder || defaultInnerOrder;
-  var sdp = [];
-
-  // loop through outerOrder for matching properties on session
-  outerOrder.forEach(function (type) {
-    grammar[type].forEach(function (obj) {
-      if (obj.name in session && session[obj.name] != null) {
-        sdp.push(makeLine(type, obj, session));
-      }
-      else if (obj.push in session && session[obj.push] != null) {
-        session[obj.push].forEach(function (el) {
-          sdp.push(makeLine(type, obj, el));
-        });
-      }
-    });
-  });
-
-  // then for each media line, follow the innerOrder
-  session.media.forEach(function (mLine) {
-    sdp.push(makeLine('m', grammar.m[0], mLine));
-
-    innerOrder.forEach(function (type) {
-      grammar[type].forEach(function (obj) {
-        if (obj.name in mLine && mLine[obj.name] != null) {
-          sdp.push(makeLine(type, obj, mLine));
-        }
-        else if (obj.push in mLine && mLine[obj.push] != null) {
-          mLine[obj.push].forEach(function (el) {
-            sdp.push(makeLine(type, obj, el));
-          });
-        }
-      });
-    });
-  });
-
-  return sdp.join('\r\n') + '\r\n';
-};
-
-},{"./grammar":43}],47:[function(require,module,exports){
-module.exports={
-  "name": "jssip",
-  "title": "JsSIP",
-  "description": "the Javascript SIP library",
-  "version": "2.0.2",
-  "homepage": "http://jssip.net",
-  "author": "José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)",
-  "contributors": [
-    "Iñaki Baz Castillo <ibc@aliax.net> (https://github.com/ibc)",
-    "Saúl Ibarra Corretgé <saghul@gmail.com> (https://github.com/saghul)"
-  ],
-  "main": "lib/JsSIP.js",
-  "keywords": [
-    "sip",
-    "websocket",
-    "webrtc",
-    "node",
-    "browser",
-    "library"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/versatica/JsSIP.git"
-  },
-  "bugs": {
-    "url": "https://github.com/versatica/JsSIP/issues"
-  },
-  "dependencies": {
-    "debug": "^2.2.0",
-    "rtcninja": "^0.6.7",
-    "sdp-transform": "^1.6.2"
-  },
-  "devDependencies": {
-    "browserify": "^13.0.1",
-    "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
-    "gulp-expect-file": "0.0.7",
-    "gulp-header": "1.8.2",
-    "gulp-jshint": "^2.0.1",
-    "gulp-nodeunit-runner": "^0.2.2",
-    "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.5.3",
-    "gulp-util": "^3.0.7",
-    "jshint": "^2.9.2",
-    "jshint-stylish": "^2.2.0",
-    "pegjs": "0.7.0",
-    "vinyl-buffer": "^1.0.0",
-    "vinyl-source-stream": "^1.1.0"
-  },
-  "scripts": {
-    "test": "gulp test"
   }
 }
 
 },{}]},{},[7])(7)
 });
+
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.io = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(_dereq_,module,exports){
 
 module.exports =  _dereq_('./lib/');
