@@ -1,5 +1,8 @@
 # Change Log
 
+## 2.1.2 - November 2016
+* Fix for #36. Updates jsSIP library (v2.0.6)
+
 ## 2.1.1 - November 2016
 * Updates Callstats JS library
 
