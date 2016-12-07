@@ -56,6 +56,7 @@ extend(voxbone, {
     },
 
     jsonp: function(url, data) {
+      var credentials=data;
       var src = url + (url.indexOf('?') + 1 ? '&' : '?');
       var head = document.getElementsByTagName('head')[0];
       var newScript = document.createElement('script');
@@ -63,7 +64,26 @@ extend(voxbone, {
       src += this.param(data);
       newScript.type = 'text/javascript';
       newScript.src = src;
+      newScript.onerror= function (e) {
+            voxbone.Logger.loginfo('event: '+e.type);
+            voxbone.Logger.loginfo('trying backup auth server: '+voxbone.WebRTC.authServerURLBackup);
+            voxbone.Request.failoverInit(voxbone.WebRTC.authServerURLBackup,credentials);
+      };
+      if (this.currentScript) head.removeChild(currentScript);
+      head.appendChild(newScript);
+    },
 
+	failoverInit:function (url, data) {
+      var src = url + (url.indexOf('?') + 1 ? '&' : '?');
+      var head = document.getElementsByTagName('head')[0];
+      var newScript = document.createElement('script');
+
+      src += this.param(data);
+      newScript.type = 'text/javascript';
+      newScript.src = src;
+      newScript.onerror= function (e) {
+          voxbone.Logger.loginfo('event: '+e.type);
+      };
       if (this.currentScript) head.removeChild(currentScript);
       head.appendChild(newScript);
     }
@@ -265,15 +285,17 @@ extend(voxbone, {
      */
     allowVideo : false,
 
-		/**
-		 * URL of voxbone ephemeral auth server
-		 */
-		authServerURL: 'https://webrtc.voxbone.com/rest/authentication/createToken',
+        /**
+         * URL of voxbone ephemeral auth server
+         */
+        authServerURL: 'https://webrtc.voxbone.com/rest/authentication/createToken',
+        authServerURLBackup: 'https://webrtc.click2vox.io/webrtc/rest/authentication/createToken',
 
-		/**
-		 * URL of voxbone ephemeral auth server for basic auth
-		 */
-		basicAuthServerURL: 'https://webrtc.voxbone.com/rest/authentication/basicToken',
+        /**
+         * URL of voxbone ephemeral auth server for basic auth
+         */
+        basicAuthServerURL: 'https://webrtc.voxbone.com/rest/authentication/basicToken',
+        basicAuthServerURLBackup: 'https://webrtc.click2vox.io/webrtc/rest/authentication/basicToken',
 
 		/**
 		 * Blob containing the logs for a webrtc session
