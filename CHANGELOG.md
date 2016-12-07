@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.1.3 - December 2016
+* Fix for #41. Updates Callstats JS library (v3.17.0)
+* Fix for bug about properly end a call if the the container window is closed
+
 ## 2.1.2 - November 2016
 * Fix for #36. Updates jsSIP library (v2.0.6)
 
