@@ -243,7 +243,6 @@ extend(voxbone, {
 extend(voxbone, {
 
 	WebRTC: {
-                callStats : undefined,
 		/**
 		 * id of the <audio/> html tag.
 		 * If an audio element with this id already exists in the page, the script will load it and attach audio stream to it.
@@ -461,15 +460,6 @@ extend(voxbone, {
 				// refresh at 75% of duration
 				setTimeout(this.customEventHandler.authExpired, timeout * 750);
 			}
-
-			var callstats_credentials = data.callStatsCredentials;
-			voxbone.WebRTC.callStats = new callstats(null, io, jsSHA);
-
-			var csInitCallback = function(csError, csMsg) {
-				voxbone.Logger.loginfo("callStats Status: errCode= " + csError + " Msg= " + csMsg );
-			};
-			var localUserId = ((data.username).split(":"))[1];
-			voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret , localUserId, csInitCallback, null, null);
 		},
 
 		/**
@@ -722,8 +712,7 @@ extend(voxbone, {
 					'sending': function (e) {
 						voxbone.WebRTC.callid = e.request.call_id;
 						var  pc = voxbone.WebRTC.rtcSession.connection.pc;
-						var remoteUserId  = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
-						voxbone.WebRTC.callStats.addNewFabric(pc, remoteUserId, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
+						var remoteUserId = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
 					},
 					'progress': function (e) {
 						voxbone.WebRTC.customEventHandler.progress(e);
@@ -731,7 +720,6 @@ extend(voxbone, {
 					'failed': function (e) {
 						var pcObject;
 						var conferenceID = voxbone.WebRTC.callid;
-						var callStats = voxbone.WebRTC.callStats;
 
 						voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
 
@@ -741,16 +729,11 @@ extend(voxbone, {
 						switch(e.cause) {
 							case JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS:
 								if (typeof pcObject === 'object')
-									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.getUserMedia);
 								voxbone.WebRTC.customEventHandler.getUserMediaFailed(e);
 								break;
 
 							case JsSIP.C.causes.INCOMPATIBLE_SDP:
 							case JsSIP.C.causes.MISSING_SDP:
-								if (typeof pcObject === 'object')
-									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
-								break;
-
 							case JsSIP.C.causes.BYE:
 							case JsSIP.C.causes.CANCELED:
 							case JsSIP.C.causes.NO_ANSWER:
@@ -761,10 +744,6 @@ extend(voxbone, {
 							case JsSIP.C.causes.REDIRECTED:
 							case JsSIP.C.causes.UNAVAILABLE:
 							case JsSIP.C.causes.NOT_FOUND:
-								if (typeof pcObject === 'object')
-									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
-								break;
-
 							case JsSIP.C.causes.DIALOG_ERROR:
 							case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
 							case JsSIP.C.causes.RTP_TIMEOUT:
@@ -775,8 +754,6 @@ extend(voxbone, {
 							case JsSIP.C.causes.ADDRESS_INCOMPLETE:
 							case JsSIP.C.causes.AUTHENTICATION_ERROR:
 							default:
-								if (typeof pcObject === 'object')
-									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
 								break;
 						}
 
@@ -906,7 +883,6 @@ extend(voxbone, {
 				}
 			}
 			this.isMuted = true;
-			voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
 		},
 
 		/**
@@ -920,7 +896,6 @@ extend(voxbone, {
 				}
 			}
 			this.isMuted = false;
-			voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
 		},
 
 		/**

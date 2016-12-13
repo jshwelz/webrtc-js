@@ -1,5 +1,8 @@
 # Change Log
 
+## 2.1.4 - December 2016
+* Temporaly removing Callstats integration
+
 ## 2.1.3 - December 2016
 * Fix for #41. Updates Callstats JS library (v3.17.0)
 * Fix for bug about properly end a call if the the container window is closed
