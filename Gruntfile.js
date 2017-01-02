@@ -64,12 +64,23 @@ module.exports = function(grunt) {
           ]
         }
       }
+    },
+    jshint: {
+      files: [
+          '*.js',
+          'src/*.js'
+        ],
+      options: {
+        globals: {
+        }
+      }
     }
   });
 
   grunt.loadNpmTasks('grunt-aws');
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-uglify');
+  grunt.loadNpmTasks('grunt-contrib-jshint');
 
   grunt.registerTask('clear-version', 'Reset version variable in process.env', function() {
     delete process.env.version;
@@ -84,7 +95,7 @@ module.exports = function(grunt) {
 
     switch (type) {
       case 'major':
-        process.env.version = major
+        process.env.version = major;
         break;
       case 'minor':
         process.env.version = major + '.' + minor;
@@ -98,4 +109,4 @@ module.exports = function(grunt) {
 
   grunt.registerTask('build-js', ['concat:voxbone', 'uglify:voxbone']);
   grunt.registerTask('dist', ['s3:production', 'cloudfront:voxbone']);
-}
+};
