@@ -1,6 +1,6 @@
 /*!
- * @license Voxbone v2.1.3
- * Copyright 2016 Voxbone. All Rights Reserved.
+ * @license Voxbone v2.1.5
+ * Copyright 2017 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//**
  * @license JsSIP v2.0.6
@@ -34570,9 +34570,9 @@ extend(voxbone, {
 		 * @returns Name of the Pop which has the best ping
 		 */
 		getBestPop: function () {
-			var bestPop = undefined;
+			var bestPop;
             //If no proper ping server found, default to BE
-            if(this.pingResults.length == 0){
+            if(this.pingResults.length === 0){
                 bestPop =  {
                     name:'BE',
                     ping: -1
@@ -34581,7 +34581,7 @@ extend(voxbone, {
             }else{
                 for (var i = 0; i < this.pingResults.length; i++) {
                     var result = this.pingResults[i];
-                    if ((bestPop == undefined) || (result.ping > 0 && ((bestPop.ping < 0) || (result.ping < bestPop.ping) ))) {
+                    if ((bestPop === undefined) || (result.ping > 0 && ((bestPop.ping < 0) || (result.ping < bestPop.ping) ))) {
                         bestPop = result;
                     }
                 }
@@ -34801,7 +34801,7 @@ extend(voxbone, {
 			// If no prefered Pop is defined, ping and determine which one to prefer
 			if (typeof this.preferedPop === 'undefined') {
 				voxbone.Logger.loginfo("prefered pop undefined, pinging....");
-				this.pingServers = data["pingServers"];
+				this.pingServers = data.pingServers;
 				for (var i = 0; i < this.pingServers.length; i++) {
 					voxbone.Pinger.ping(i, this.pingServers[i]);
 				}
@@ -34833,7 +34833,7 @@ extend(voxbone, {
 		 */
 
 		getAuthExpiration: function (data) {
-			var now = Math.floor((new Date).getTime()/1000);
+			var now = Math.floor((new Date()).getTime()/1000);
 			var fields = this.configuration.authorization_user.split(/:/);
 			return fields[0] - now;
 		},
@@ -34886,7 +34886,7 @@ extend(voxbone, {
 
 
     sendPreConfiguredDtmf : function(digitsPending) {
-			var digit = undefined;
+			var digit;
 			var pause = 0;
 			var digit_sent = false;
 
@@ -35049,13 +35049,15 @@ extend(voxbone, {
 										voxbone.WebRTC.audioContext = new AudioContext();
 									}
 								}
-								catch (e) {
-									voxbone.Logger.logerror("Web Audio API not supported " + e);
+								catch (err) {
+									voxbone.Logger.logerror("Web Audio API not supported " + err);
 								}
 								voxbone.WebRTC.audioScriptProcessor = voxbone.WebRTC.audioContext.createScriptProcessor(0, 1, 1);
 								var mic = voxbone.WebRTC.audioContext.createMediaStreamSource(streams[i]);
 								mic.connect(voxbone.WebRTC.audioScriptProcessor);
 								voxbone.WebRTC.audioScriptProcessor.connect(voxbone.WebRTC.audioContext.destination);
+
+								/* jshint loopfunc:true */
 								voxbone.WebRTC.audioScriptProcessor.onaudioprocess = function(event) {
 									var input = event.inputBuffer.getChannelData(0);
 									var i;
@@ -35064,7 +35066,7 @@ extend(voxbone, {
 										sum += input[i] * input[i];
 									}
 									voxbone.WebRTC.localVolume = Math.sqrt(sum / input.length);
-								}
+								};
 								voxbone.WebRTC.localVolumeTimer = setInterval(function() {
 									var e = { localVolume : voxbone.WebRTC.localVolume.toFixed(2)};
 									voxbone.WebRTC.customEventHandler.localMediaVolume(e);
@@ -35119,15 +35121,15 @@ extend(voxbone, {
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
 								break;
 
-							case JsSIP.C.causes.DIALOG_ERROR:
-							case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
-							case JsSIP.C.causes.RTP_TIMEOUT:
-							case JsSIP.C.causes.SIP_FAILURE_CODE:
-							case JsSIP.C.causes.REQUEST_TIMEOUT:
-							case JsSIP.C.causes.CONNECTION_ERROR:
-							case JsSIP.C.causes.INTERNAL_ERROR:
-							case JsSIP.C.causes.ADDRESS_INCOMPLETE:
-							case JsSIP.C.causes.AUTHENTICATION_ERROR:
+							// case JsSIP.C.causes.DIALOG_ERROR:
+							// case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
+							// case JsSIP.C.causes.RTP_TIMEOUT:
+							// case JsSIP.C.causes.SIP_FAILURE_CODE:
+							// case JsSIP.C.causes.REQUEST_TIMEOUT:
+							// case JsSIP.C.causes.CONNECTION_ERROR:
+							// case JsSIP.C.causes.INTERNAL_ERROR:
+							// case JsSIP.C.causes.ADDRESS_INCOMPLETE:
+							// case JsSIP.C.causes.AUTHENTICATION_ERROR:
 							default:
 								if (typeof pcObject === 'object')
 									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
@@ -35161,15 +35163,17 @@ extend(voxbone, {
 					},
 				},
 				'extraHeaders': [],
-				'pcConfig': {},
+				'pcConfig': { rtcpMuxPolicy: "negotiate" },
 				'mediaConstraints': {'audio': true, 'video': voxbone.WebRTC.allowVideo}
 			};
 			if (this.configuration.stun_servers !== undefined || this.configuration.turn_servers !== undefined) {
+				var i;
 				var ice_servers = [];
-				for (var i=0; i < this.configuration.stun_servers.length; i++) {
+
+				for (i = 0; i < this.configuration.stun_servers.length; i++) {
 					ice_servers.push(this.configuration.stun_servers[i]);
 				}
-				for (var i=0; i < this.configuration.turn_servers.length; i++) {
+				for (i = 0; i < this.configuration.turn_servers.length; i++) {
 					ice_servers.push(this.configuration.turn_servers[i]);
 				}
 				options.pcConfig.iceServers = ice_servers;
@@ -35287,7 +35291,7 @@ extend(voxbone, {
 					voxbone.Logger.loginfo("Page unloading while a call was in progress, hanging up");
 					voxbone.WebRTC.hangup();
 					voxbone.WebRTC.postLogsToServer();
-			} else if (voxbone.WebRTC.configuration.post_logs_nocall == true) {
+			} else if (voxbone.WebRTC.configuration.post_logs_nocall === true) {
 				/*Don't care if any calls were made, we still want logs*/
 				voxbone.WebRTC.postLogsToServer();
 			}
