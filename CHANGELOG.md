@@ -1,5 +1,11 @@
 # Change Log
 
+## 2.1.6 - February 2017
+* Fix for #63. Removing socket.io
+* Fix for #68. Send DTMF tones in the right event
+* Updates Callstats JS library (v3.17.7)
+* Updates grunt-contrib-uglify (v2.1.0)
+
 ## 2.1.5 - February 2017
 * Adds "rtcpMuxPolicy" flag for Chrome v57+
 * Putting back Callstats integration

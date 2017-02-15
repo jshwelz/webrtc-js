@@ -463,13 +463,13 @@ extend(voxbone, {
 			}
 
 			var callstats_credentials = data.callStatsCredentials;
-			voxbone.WebRTC.callStats = new callstats(null, io, jsSHA);
+			voxbone.WebRTC.callStats = new callstats(null, null, jsSHA);
 
 			var csInitCallback = function(csError, csMsg) {
 				voxbone.Logger.loginfo("callStats Status: errCode= " + csError + " Msg= " + csMsg );
 			};
 			var localUserId = ((data.username).split(":"))[1];
-			voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret , localUserId, csInitCallback, null, null);
+			voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
 		},
 
 		/**
@@ -796,6 +796,8 @@ extend(voxbone, {
 						} else{
 							voxbone.WebRTC.initAudioElement(voxbone.WebRTC.audioComponentName, e.stream);
 						}
+					},
+					'confirmed': function (e) {
 						//Check if the customer has configured any dialer string, use that to bypass IVRs
 						if (voxbone.WebRTC.configuration.dialer_string !== undefined && voxbone.WebRTC.configuration.dialer_string.length > 0) {
 							var digitsPending = voxbone.WebRTC.configuration.dialer_string.split(',');

@@ -1,7 +1,11 @@
-/**
- * @preserve JsSIP v0.7.9
+/*!
+ * @license Voxbone v2.1.6
+ * Copyright 2017 Voxbone. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License") 
+ *//**
+ * @license JsSIP v2.0.6
  * the Javascript SIP library
- * Copyright: 2012-2015 José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)
+ * Copyright: 2012-2016 José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)
  * Homepage: http://jssip.net
  * License: MIT
  */
@@ -54,7 +58,7 @@ var C = {
     REJECTED: [403,603],
     NOT_FOUND: [404,604],
     UNAVAILABLE: [480,410,408,430],
-    ADDRESS_INCOMPLETE: [484],
+    ADDRESS_INCOMPLETE: [484, 424],
     INCOMPATIBLE_SDP: [488,606],
     AUTHENTICATION_ERROR:[401,407]
   },
@@ -112,6 +116,7 @@ var C = {
     421: 'Extension Required',
     422: 'Session Interval Too Small',  // RFC 4028
     423: 'Interval Too Brief',
+    424: 'Bad Location Information',  // RFC 6442
     428: 'Use Identity Header',  // RFC 4474
     429: 'Provide Referrer Identity',  // RFC 3892
     430: 'Flow Failed',  // RFC 5626
@@ -151,17 +156,17 @@ var C = {
     606: 'Not Acceptable'
   },
 
-  ALLOWED_METHODS: 'INVITE,ACK,CANCEL,BYE,UPDATE,MESSAGE,OPTIONS,REFER',
+  ALLOWED_METHODS: 'INVITE,ACK,CANCEL,BYE,UPDATE,MESSAGE,OPTIONS,REFER,INFO',
   ACCEPTED_BODY_TYPES: 'application/sdp, application/dtmf-relay',
   MAX_FORWARDS: 69,
-  SESSION_EXPIRES: 3600,
+  SESSION_EXPIRES: 90,
   MIN_SESSION_EXPIRES: 60
 };
 
 
 module.exports = C;
 
-},{"../package.json":49}],2:[function(require,module,exports){
+},{"../package.json":40}],2:[function(require,module,exports){
 module.exports = Dialog;
 
 
@@ -181,8 +186,6 @@ Dialog.C = C;
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:Dialog');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
 var SIPMessage = require('./SIPMessage');
 var JsSIP_C = require('./Constants');
 var Transactions = require('./Transactions');
@@ -366,6 +369,9 @@ Dialog.prototype = {
       request_sender = new Dialog_RequestSender(this, applicant, request);
 
       request_sender.send();
+
+      // Return the instance of OutgoingRequest
+      return request;
   },
 
   receiveRequest: function(request) {
@@ -378,7 +384,7 @@ Dialog.prototype = {
   }
 };
 
-},{"./Constants":1,"./Dialog/RequestSender":3,"./SIPMessage":18,"./Transactions":20,"./VoxboneLogger.js":25,"debug":32}],3:[function(require,module,exports){
+},{"./Constants":1,"./Dialog/RequestSender":3,"./SIPMessage":18,"./Transactions":21,"debug":33}],3:[function(require,module,exports){
 module.exports = DialogRequestSender;
 
 /**
@@ -458,7 +464,7 @@ DialogRequestSender.prototype = {
   }
 };
 
-},{"../Constants":1,"../RTCSession":11,"../RequestSender":17,"../Transactions":20}],4:[function(require,module,exports){
+},{"../Constants":1,"../RTCSession":11,"../RequestSender":17,"../Transactions":21}],4:[function(require,module,exports){
 module.exports = DigestAuthentication;
 
 
@@ -466,28 +472,51 @@ module.exports = DigestAuthentication;
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:DigestAuthentication');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
+var debugerror = require('debug')('JsSIP:ERROR:DigestAuthentication');
+debugerror.log = console.warn.bind(console);
 var Utils = require('./Utils');
 
 
-function DigestAuthentication(ua) {
-  this.username = ua.configuration.authorization_user;
-  this.password = ua.configuration.password;
+function DigestAuthentication(credentials) {
+  this.credentials = credentials;
   this.cnonce = null;
   this.nc = 0;
   this.ncHex = '00000000';
+  this.algorithm = null;
+  this.realm = null;
+  this.nonce = null;
+  this.opaque = null;
+  this.stale = null;
+  this.qop = null;
+  this.method = null;
+  this.uri = null;
+  this.ha1 = null;
   this.response = null;
 }
+
+
+DigestAuthentication.prototype.get = function(parameter) {
+  switch (parameter) {
+    case 'realm':
+      return this.realm;
+
+    case 'ha1':
+      return this.ha1;
+
+    default:
+      debugerror('get() | cannot get "%s" parameter', parameter);
+      return undefined;
+  }
+};
 
 
 /**
 * Performs Digest authentication given a SIP request and the challenge
 * received in a response to that request.
-* Returns true if credentials were successfully generated, false otherwise.
+* Returns true if auth was successfully generated, false otherwise.
 */
 DigestAuthentication.prototype.authenticate = function(request, challenge) {
-  // Inspect and validate the challenge.
+  var ha2, hex;
 
   this.algorithm = challenge.algorithm;
   this.realm = challenge.realm;
@@ -497,21 +526,36 @@ DigestAuthentication.prototype.authenticate = function(request, challenge) {
 
   if (this.algorithm) {
     if (this.algorithm !== 'MD5') {
-      debug('challenge with Digest algorithm different than "MD5", authentication aborted');
+      debugerror('authenticate() | challenge with Digest algorithm different than "MD5", authentication aborted');
       return false;
     }
   } else {
     this.algorithm = 'MD5';
   }
 
-  if (! this.realm) {
-    debug('challenge without Digest realm, authentication aborted');
+  if (!this.nonce) {
+    debugerror('authenticate() | challenge without Digest nonce, authentication aborted');
     return false;
   }
 
-  if (! this.nonce) {
-    debug('challenge without Digest nonce, authentication aborted');
+  if (!this.realm) {
+    debugerror('authenticate() | challenge without Digest realm, authentication aborted');
     return false;
+  }
+
+  // If no plain SIP password is provided.
+  if (!this.credentials.password) {
+    // If ha1 is not provided we cannot authenticate.
+    if (!this.credentials.ha1) {
+      debugerror('authenticate() | no plain SIP password nor ha1 provided, authentication aborted');
+      return false;
+    }
+
+    // If the realm does not match the stored realm we cannot authenticate.
+    if (this.credentials.realm !== this.realm) {
+      debugerror('authenticate() | no plain SIP password, and stored `realm` does not match the given `realm`, cannot authenticate [stored:"%s", given:"%s"]', this.credentials.realm, this.realm);
+      return false;
+    }
   }
 
   // 'qop' can contain a list of values (Array). Let's choose just one.
@@ -522,7 +566,7 @@ DigestAuthentication.prototype.authenticate = function(request, challenge) {
       this.qop = 'auth-int';
     } else {
       // Otherwise 'qop' is present but does not contain 'auth' or 'auth-int', so abort here.
-      debug('challenge without Digest qop different than "auth" or "auth-int", authentication aborted');
+      debugerror('authenticate() | challenge without Digest qop different than "auth" or "auth-int", authentication aborted');
       return false;
     }
   } else {
@@ -535,7 +579,8 @@ DigestAuthentication.prototype.authenticate = function(request, challenge) {
   this.uri = request.ruri;
   this.cnonce = Utils.createRandomToken(12);
   this.nc += 1;
-  this.updateNcHex();
+  hex = Number(this.nc).toString(16);
+  this.ncHex = '00000000'.substr(0, 8-hex.length) + hex;
 
   // nc-value = 8LHEX. Max value = 'FFFFFFFF'.
   if (this.nc === 4294967296) {
@@ -544,39 +589,39 @@ DigestAuthentication.prototype.authenticate = function(request, challenge) {
   }
 
   // Calculate the Digest "response" value.
-  this.calculateResponse();
 
-  return true;
-};
-
-
-/**
-* Generate Digest 'response' value.
-*/
-DigestAuthentication.prototype.calculateResponse = function() {
-  var ha1, ha2;
-
-  // HA1 = MD5(A1) = MD5(username:realm:password)
-  ha1 = Utils.calculateMD5(this.username + ':' + this.realm + ':' + this.password);
+  // If we have plain SIP password then regenerate ha1.
+  if (this.credentials.password) {
+    // HA1 = MD5(A1) = MD5(username:realm:password)
+    this.ha1 = Utils.calculateMD5(this.credentials.username + ':' + this.realm + ':' + this.credentials.password);
+    //
+  // Otherwise reuse the stored ha1.
+  } else {
+    this.ha1 = this.credentials.ha1;
+  }
 
   if (this.qop === 'auth') {
     // HA2 = MD5(A2) = MD5(method:digestURI)
     ha2 = Utils.calculateMD5(this.method + ':' + this.uri);
     // response = MD5(HA1:nonce:nonceCount:credentialsNonce:qop:HA2)
-    this.response = Utils.calculateMD5(ha1 + ':' + this.nonce + ':' + this.ncHex + ':' + this.cnonce + ':auth:' + ha2);
+    this.response = Utils.calculateMD5(this.ha1 + ':' + this.nonce + ':' + this.ncHex + ':' + this.cnonce + ':auth:' + ha2);
 
   } else if (this.qop === 'auth-int') {
     // HA2 = MD5(A2) = MD5(method:digestURI:MD5(entityBody))
     ha2 = Utils.calculateMD5(this.method + ':' + this.uri + ':' + Utils.calculateMD5(this.body ? this.body : ''));
     // response = MD5(HA1:nonce:nonceCount:credentialsNonce:qop:HA2)
-    this.response = Utils.calculateMD5(ha1 + ':' + this.nonce + ':' + this.ncHex + ':' + this.cnonce + ':auth-int:' + ha2);
+    this.response = Utils.calculateMD5(this.ha1 + ':' + this.nonce + ':' + this.ncHex + ':' + this.cnonce + ':auth-int:' + ha2);
 
   } else if (this.qop === null) {
     // HA2 = MD5(A2) = MD5(method:digestURI)
     ha2 = Utils.calculateMD5(this.method + ':' + this.uri);
     // response = MD5(HA1:nonce:HA2)
-    this.response = Utils.calculateMD5(ha1 + ':' + this.nonce + ':' + ha2);
+    this.response = Utils.calculateMD5(this.ha1 + ':' + this.nonce + ':' + ha2);
   }
+
+  debug('authenticate() | response generated');
+
+  return true;
 };
 
 
@@ -586,12 +631,12 @@ DigestAuthentication.prototype.calculateResponse = function() {
 DigestAuthentication.prototype.toString = function() {
   var auth_params = [];
 
-  if (! this.response) {
+  if (!this.response) {
     throw new Error('response field does not exist, cannot generate Authorization header');
   }
 
   auth_params.push('algorithm=' + this.algorithm);
-  auth_params.push('username="' + this.username + '"');
+  auth_params.push('username="' + this.credentials.username + '"');
   auth_params.push('realm="' + this.realm + '"');
   auth_params.push('nonce="' + this.nonce + '"');
   auth_params.push('uri="' + this.uri + '"');
@@ -608,16 +653,7 @@ DigestAuthentication.prototype.toString = function() {
   return 'Digest ' + auth_params.join(', ');
 };
 
-
-/**
-* Generate the 'nc' value as required by Digest in this.ncHex by reading this.nc.
-*/
-DigestAuthentication.prototype.updateNcHex = function() {
-  var hex = Number(this.nc).toString(16);
-  this.ncHex = '00000000'.substr(0, 8-hex.length) + hex;
-};
-
-},{"./Utils":24,"./VoxboneLogger.js":25,"debug":32}],5:[function(require,module,exports){
+},{"./Utils":25,"debug":33}],5:[function(require,module,exports){
 /**
  * @namespace Exceptions
  * @memberOf JsSIP
@@ -682,7 +718,6 @@ module.exports = (function(){
    *
    * http://pegjs.majda.cz/
    */
-
   function quote(s) {
     /*
      * ECMA-262, 5th ed., 7.8.4: All characters may appear literally in a
@@ -705,7 +740,6 @@ module.exports = (function(){
       .replace(/[\x00-\x07\x0B\x0E-\x1F\x80-\uFFFF]/g, escape)
       + '"';
   }
-
   var result = {
     /*
      * Parses the input with a generated parser. If the parsing is successfull,
@@ -762,6 +796,8 @@ module.exports = (function(){
         "SIP_URI_noparams": parse_SIP_URI_noparams,
         "SIP_URI": parse_SIP_URI,
         "uri_scheme": parse_uri_scheme,
+        "uri_scheme_sips": parse_uri_scheme_sips,
+        "uri_scheme_sip": parse_uri_scheme_sip,
         "userinfo": parse_userinfo,
         "user": parse_user,
         "user_unreserved": parse_user_unreserved,
@@ -939,7 +975,6 @@ module.exports = (function(){
         "from_tag": parse_from_tag,
         "early_flag": parse_early_flag
       };
-
       if (startRule !== undefined) {
         if (parseFunctions[startRule] === undefined) {
           throw new Error("Invalid rule name: " + quote(startRule) + ".");
@@ -947,28 +982,22 @@ module.exports = (function(){
       } else {
         startRule = "CRLF";
       }
-
       var pos = 0;
       var reportFailures = 0;
       var rightmostFailuresPos = 0;
       var rightmostFailuresExpected = [];
-
       function padLeft(input, padding, length) {
         var result = input;
-
         var padLength = length - input.length;
         for (var i = 0; i < padLength; i++) {
           result = padding + result;
         }
-
         return result;
       }
-
       function escape(ch) {
         var charCode = ch.charCodeAt(0);
         var escapeChar;
         var length;
-
         if (charCode <= 0xFF) {
           escapeChar = 'x';
           length = 2;
@@ -976,26 +1005,20 @@ module.exports = (function(){
           escapeChar = 'u';
           length = 4;
         }
-
         return '\\' + escapeChar + padLeft(charCode.toString(16).toUpperCase(), '0', length);
       }
-
       function matchFailed(failure) {
         if (pos < rightmostFailuresPos) {
           return;
         }
-
         if (pos > rightmostFailuresPos) {
           rightmostFailuresPos = pos;
           rightmostFailuresExpected = [];
         }
-
         rightmostFailuresExpected.push(failure);
       }
-
       function parse_CRLF() {
         var result0;
-
         if (input.substr(pos, 2) === "\r\n") {
           result0 = "\r\n";
           pos += 2;
@@ -1007,10 +1030,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_DIGIT() {
         var result0;
-
         if (/^[0-9]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1022,10 +1043,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ALPHA() {
         var result0;
-
         if (/^[a-zA-Z]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1037,10 +1056,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_HEXDIG() {
         var result0;
-
         if (/^[0-9a-fA-F]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1052,20 +1069,16 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_WSP() {
         var result0;
-
         result0 = parse_SP();
         if (result0 === null) {
           result0 = parse_HTAB();
         }
         return result0;
       }
-
       function parse_OCTET() {
         var result0;
-
         if (/^[\0-\xFF]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1077,10 +1090,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_DQUOTE() {
         var result0;
-
         if (/^["]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1092,10 +1103,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SP() {
         var result0;
-
         if (input.charCodeAt(pos) === 32) {
           result0 = " ";
           pos++;
@@ -1107,10 +1116,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_HTAB() {
         var result0;
-
         if (input.charCodeAt(pos) === 9) {
           result0 = "\t";
           pos++;
@@ -1122,10 +1129,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_alphanum() {
         var result0;
-
         if (/^[a-zA-Z0-9]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1137,10 +1142,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_reserved() {
         var result0;
-
         if (input.charCodeAt(pos) === 59) {
           result0 = ";";
           pos++;
@@ -1251,20 +1254,16 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_unreserved() {
         var result0;
-
         result0 = parse_alphanum();
         if (result0 === null) {
           result0 = parse_mark();
         }
         return result0;
       }
-
       function parse_mark() {
         var result0;
-
         if (input.charCodeAt(pos) === 45) {
           result0 = "-";
           pos++;
@@ -1364,11 +1363,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_escaped() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.charCodeAt(pos) === 37) {
@@ -1406,11 +1403,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_LWS() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         pos2 = pos;
@@ -1462,19 +1457,15 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SWS() {
         var result0;
-
         result0 = parse_LWS();
         result0 = result0 !== null ? result0 : "";
         return result0;
       }
-
       function parse_HCOLON() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = [];
@@ -1523,11 +1514,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_TEXT_UTF8_TRIM() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result1 = parse_TEXT_UTF8char();
@@ -1602,10 +1591,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_TEXT_UTF8char() {
         var result0;
-
         if (/^[!-~]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1620,10 +1607,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_UTF8_NONASCII() {
         var result0;
-
         if (/^[\x80-\uFFFF]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1635,10 +1620,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_UTF8_CONT() {
         var result0;
-
         if (/^[\x80-\xBF]/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -1650,10 +1633,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_LHEX() {
         var result0;
-
         result0 = parse_DIGIT();
         if (result0 === null) {
           if (/^[a-f]/.test(input.charAt(pos))) {
@@ -1668,11 +1649,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_token() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_alphanum();
         if (result1 === null) {
@@ -1913,11 +1892,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_token_nodot() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_alphanum();
         if (result1 === null) {
@@ -2136,10 +2113,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_separators() {
         var result0;
-
         if (input.charCodeAt(pos) === 40) {
           result0 = "(";
           pos++;
@@ -2325,11 +2300,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_word() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_alphanum();
         if (result1 === null) {
@@ -2840,11 +2813,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_STAR() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -2882,11 +2853,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SLASH() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -2924,11 +2893,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_EQUAL() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -2966,11 +2933,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_LPAREN() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3008,11 +2973,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_RPAREN() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3050,11 +3013,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_RAQUOT() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.charCodeAt(pos) === 62) {
@@ -3086,11 +3047,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_LAQUOT() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3122,11 +3081,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_COMMA() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3164,11 +3121,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SEMI() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3206,11 +3161,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_COLON() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3248,11 +3201,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_LDQUOT() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3276,11 +3227,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_RDQUOT() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_DQUOTE();
@@ -3304,11 +3253,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_comment() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_LPAREN();
         if (result0 !== null) {
@@ -3348,10 +3295,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ctext() {
         var result0;
-
         if (/^[!-']/.test(input.charAt(pos))) {
           result0 = input.charAt(pos);
           pos++;
@@ -3391,11 +3336,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_quoted_string() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3443,11 +3386,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_quoted_string_clean() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SWS();
@@ -3495,10 +3436,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_qdtext() {
         var result0;
-
         result0 = parse_LWS();
         if (result0 === null) {
           if (input.charCodeAt(pos) === 33) {
@@ -3538,11 +3477,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_quoted_pair() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         if (input.charCodeAt(pos) === 92) {
           result0 = "\\";
@@ -3597,11 +3534,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SIP_URI_noparams() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_uri_scheme();
@@ -3656,11 +3591,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SIP_URI() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_uri_scheme();
@@ -3721,7 +3654,6 @@ module.exports = (function(){
                                 delete data.host_type;
                                 delete data.port;
                                 delete data.uri_params;
-
                                 if (startRule === 'SIP_URI') { data = data.uri;}
                               } catch(e) {
                                 data = -1;
@@ -3732,11 +3664,40 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uri_scheme() {
         var result0;
+        result0 = parse_uri_scheme_sips();
+        if (result0 === null) {
+          result0 = parse_uri_scheme_sip();
+        }
+        return result0;
+      }
+      function parse_uri_scheme_sips() {
+        var result0;
         var pos0;
-
+        pos0 = pos;
+        if (input.substr(pos, 4).toLowerCase() === "sips") {
+          result0 = input.substr(pos, 4);
+          pos += 4;
+        } else {
+          result0 = null;
+          if (reportFailures === 0) {
+            matchFailed("\"sips\"");
+          }
+        }
+        if (result0 !== null) {
+          result0 = (function(offset, scheme) {
+                            data.scheme = scheme.toLowerCase(); })(pos0, result0);
+        }
+        if (result0 === null) {
+          pos = pos0;
+        }
+        return result0;
+      }
+      function parse_uri_scheme_sip() {
+        var result0;
+        var pos0;
+        pos0 = pos;
         if (input.substr(pos, 3).toLowerCase() === "sip") {
           result0 = input.substr(pos, 3);
           pos += 3;
@@ -3746,32 +3707,18 @@ module.exports = (function(){
             matchFailed("\"sip\"");
           }
         }
+        if (result0 !== null) {
+          result0 = (function(offset, scheme) {
+                            data.scheme = scheme.toLowerCase(); })(pos0, result0);
+        }
         if (result0 === null) {
-          pos0 = pos;
-          if (input.substr(pos, 4).toLowerCase() === "sips") {
-            result0 = input.substr(pos, 4);
-            pos += 4;
-          } else {
-            result0 = null;
-            if (reportFailures === 0) {
-              matchFailed("\"sips\"");
-            }
-          }
-          if (result0 !== null) {
-            result0 = (function(offset) {
-                              data.scheme = uri_scheme.toLowerCase(); })(pos0);
-          }
-          if (result0 === null) {
-            pos = pos0;
-          }
+          pos = pos0;
         }
         return result0;
       }
-
       function parse_userinfo() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_user();
@@ -3832,10 +3779,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_user() {
         var result0, result1;
-
         result1 = parse_unreserved();
         if (result1 === null) {
           result1 = parse_escaped();
@@ -3860,10 +3805,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_user_unreserved() {
         var result0;
-
         if (input.charCodeAt(pos) === 38) {
           result0 = "&";
           pos++;
@@ -3952,11 +3895,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_password() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result0 = [];
         result1 = parse_unreserved();
@@ -4089,11 +4030,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hostport() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_host();
         if (result0 !== null) {
@@ -4132,17 +4071,15 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_host() {
         var result0;
         var pos0;
-
         pos0 = pos;
-        result0 = parse_IPv4address();
+        result0 = parse_hostname();
         if (result0 === null) {
-          result0 = parse_IPv6reference();
+          result0 = parse_IPv4address();
           if (result0 === null) {
-            result0 = parse_hostname();
+            result0 = parse_IPv6reference();
           }
         }
         if (result0 !== null) {
@@ -4155,11 +4092,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hostname() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = [];
@@ -4247,75 +4182,145 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_domainlabel() {
-        var result0, result1;
-
-        if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
-          result1 = input.charAt(pos);
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("[a-zA-Z0-9_\\-]");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
-              result1 = input.charAt(pos);
+        var result0, result1, result2;
+        var pos0;
+        pos0 = pos;
+        result0 = parse_alphanum();
+        if (result0 !== null) {
+          result1 = [];
+          result2 = parse_alphanum();
+          if (result2 === null) {
+            if (input.charCodeAt(pos) === 45) {
+              result2 = "-";
               pos++;
             } else {
-              result1 = null;
+              result2 = null;
               if (reportFailures === 0) {
-                matchFailed("[a-zA-Z0-9_\\-]");
+                matchFailed("\"-\"");
+              }
+            }
+            if (result2 === null) {
+              if (input.charCodeAt(pos) === 95) {
+                result2 = "_";
+                pos++;
+              } else {
+                result2 = null;
+                if (reportFailures === 0) {
+                  matchFailed("\"_\"");
+                }
               }
             }
           }
+          while (result2 !== null) {
+            result1.push(result2);
+            result2 = parse_alphanum();
+            if (result2 === null) {
+              if (input.charCodeAt(pos) === 45) {
+                result2 = "-";
+                pos++;
+              } else {
+                result2 = null;
+                if (reportFailures === 0) {
+                  matchFailed("\"-\"");
+                }
+              }
+              if (result2 === null) {
+                if (input.charCodeAt(pos) === 95) {
+                  result2 = "_";
+                  pos++;
+                } else {
+                  result2 = null;
+                  if (reportFailures === 0) {
+                    matchFailed("\"_\"");
+                  }
+                }
+              }
+            }
+          }
+          if (result1 !== null) {
+            result0 = [result0, result1];
+          } else {
+            result0 = null;
+            pos = pos0;
+          }
         } else {
           result0 = null;
+          pos = pos0;
         }
         return result0;
       }
-
       function parse_toplabel() {
-        var result0, result1;
-
-        if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
-          result1 = input.charAt(pos);
-          pos++;
-        } else {
-          result1 = null;
-          if (reportFailures === 0) {
-            matchFailed("[a-zA-Z0-9_\\-]");
-          }
-        }
-        if (result1 !== null) {
-          result0 = [];
-          while (result1 !== null) {
-            result0.push(result1);
-            if (/^[a-zA-Z0-9_\-]/.test(input.charAt(pos))) {
-              result1 = input.charAt(pos);
+        var result0, result1, result2;
+        var pos0;
+        pos0 = pos;
+        result0 = parse_ALPHA();
+        if (result0 !== null) {
+          result1 = [];
+          result2 = parse_alphanum();
+          if (result2 === null) {
+            if (input.charCodeAt(pos) === 45) {
+              result2 = "-";
               pos++;
             } else {
-              result1 = null;
+              result2 = null;
               if (reportFailures === 0) {
-                matchFailed("[a-zA-Z0-9_\\-]");
+                matchFailed("\"-\"");
+              }
+            }
+            if (result2 === null) {
+              if (input.charCodeAt(pos) === 95) {
+                result2 = "_";
+                pos++;
+              } else {
+                result2 = null;
+                if (reportFailures === 0) {
+                  matchFailed("\"_\"");
+                }
               }
             }
           }
+          while (result2 !== null) {
+            result1.push(result2);
+            result2 = parse_alphanum();
+            if (result2 === null) {
+              if (input.charCodeAt(pos) === 45) {
+                result2 = "-";
+                pos++;
+              } else {
+                result2 = null;
+                if (reportFailures === 0) {
+                  matchFailed("\"-\"");
+                }
+              }
+              if (result2 === null) {
+                if (input.charCodeAt(pos) === 95) {
+                  result2 = "_";
+                  pos++;
+                } else {
+                  result2 = null;
+                  if (reportFailures === 0) {
+                    matchFailed("\"_\"");
+                  }
+                }
+              }
+            }
+          }
+          if (result1 !== null) {
+            result0 = [result0, result1];
+          } else {
+            result0 = null;
+            pos = pos0;
+          }
         } else {
           result0 = null;
+          pos = pos0;
         }
         return result0;
       }
-
       function parse_IPv6reference() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.charCodeAt(pos) === 91) {
@@ -4363,11 +4368,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_IPv6address() {
         var result0, result1, result2, result3, result4, result5, result6, result7, result8, result9, result10, result11, result12;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_h16();
@@ -5967,11 +5970,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_h16() {
         var result0, result1, result2, result3;
         var pos0;
-
         pos0 = pos;
         result0 = parse_HEXDIG();
         if (result0 !== null) {
@@ -6003,11 +6004,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ls32() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_h16();
         if (result0 !== null) {
@@ -6041,11 +6040,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_IPv4address() {
         var result0, result1, result2, result3, result4, result5, result6;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_dec_octet();
@@ -6125,11 +6122,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_dec_octet() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 2) === "25") {
           result0 = "25";
@@ -6257,11 +6252,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_port() {
         var result0, result1, result2, result3, result4;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_DIGIT();
@@ -6311,11 +6304,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uri_parameters() {
         var result0, result1, result2;
         var pos0;
-
         result0 = [];
         pos0 = pos;
         if (input.charCodeAt(pos) === 59) {
@@ -6366,10 +6357,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uri_parameter() {
         var result0;
-
         result0 = parse_transport_param();
         if (result0 === null) {
           result0 = parse_user_param();
@@ -6391,11 +6380,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_transport_param() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 10).toLowerCase() === "transport=") {
@@ -6473,11 +6460,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_user_param() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 5).toLowerCase() === "user=") {
@@ -6533,11 +6518,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_method_param() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 7).toLowerCase() === "method=") {
@@ -6571,11 +6554,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ttl_param() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 4).toLowerCase() === "ttl=") {
@@ -6609,11 +6590,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_maddr_param() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 6).toLowerCase() === "maddr=") {
@@ -6647,11 +6626,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_lr_param() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 2).toLowerCase() === "lr") {
@@ -6707,11 +6684,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_other_param() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_pname();
@@ -6758,18 +6733,16 @@ module.exports = (function(){
                               else {
                                 value = value[1];
                               }
-                              data.uri_params[param.toLowerCase()] = value && value.toLowerCase();})(pos0, result0[0], result0[1]);
+                              data.uri_params[param.toLowerCase()] = value;})(pos0, result0[0], result0[1]);
         }
         if (result0 === null) {
           pos = pos0;
         }
         return result0;
       }
-
       function parse_pname() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_paramchar();
         if (result1 !== null) {
@@ -6789,11 +6762,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_pvalue() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_paramchar();
         if (result1 !== null) {
@@ -6813,10 +6784,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_paramchar() {
         var result0;
-
         result0 = parse_param_unreserved();
         if (result0 === null) {
           result0 = parse_unreserved();
@@ -6826,10 +6795,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_param_unreserved() {
         var result0;
-
         if (input.charCodeAt(pos) === 91) {
           result0 = "[";
           pos++;
@@ -6907,11 +6874,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_headers() {
         var result0, result1, result2, result3, result4;
         var pos0, pos1;
-
         pos0 = pos;
         if (input.charCodeAt(pos) === 63) {
           result0 = "?";
@@ -6989,11 +6954,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_header() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_hname();
@@ -7039,10 +7002,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hname() {
         var result0, result1;
-
         result1 = parse_hnv_unreserved();
         if (result1 === null) {
           result1 = parse_unreserved();
@@ -7067,10 +7028,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hvalue() {
         var result0, result1;
-
         result0 = [];
         result1 = parse_hnv_unreserved();
         if (result1 === null) {
@@ -7091,10 +7050,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hnv_unreserved() {
         var result0;
-
         if (input.charCodeAt(pos) === 91) {
           result0 = "[";
           pos++;
@@ -7172,21 +7129,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Request_Response() {
         var result0;
-
         result0 = parse_Status_Line();
         if (result0 === null) {
           result0 = parse_Request_Line();
         }
         return result0;
       }
-
       function parse_Request_Line() {
         var result0, result1, result2, result3, result4;
         var pos0;
-
         pos0 = pos;
         result0 = parse_Method();
         if (result0 !== null) {
@@ -7221,21 +7174,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Request_URI() {
         var result0;
-
         result0 = parse_SIP_URI();
         if (result0 === null) {
           result0 = parse_absoluteURI();
         }
         return result0;
       }
-
       function parse_absoluteURI() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_scheme();
         if (result0 !== null) {
@@ -7269,11 +7218,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hier_part() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_net_path();
         if (result0 === null) {
@@ -7315,11 +7262,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_net_path() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 2) === "//") {
           result0 = "//";
@@ -7351,11 +7296,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_abs_path() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         if (input.charCodeAt(pos) === 47) {
           result0 = "/";
@@ -7380,11 +7323,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_opaque_part() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_uric_no_slash();
         if (result0 !== null) {
@@ -7406,10 +7347,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uric() {
         var result0;
-
         result0 = parse_reserved();
         if (result0 === null) {
           result0 = parse_unreserved();
@@ -7419,10 +7358,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uric_no_slash() {
         var result0;
-
         result0 = parse_unreserved();
         if (result0 === null) {
           result0 = parse_escaped();
@@ -7528,11 +7465,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_path_segments() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_segment();
         if (result0 !== null) {
@@ -7596,11 +7531,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_segment() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = [];
         result1 = parse_pchar();
@@ -7669,10 +7602,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_param() {
         var result0, result1;
-
         result0 = [];
         result1 = parse_pchar();
         while (result1 !== null) {
@@ -7681,10 +7612,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_pchar() {
         var result0;
-
         result0 = parse_unreserved();
         if (result0 === null) {
           result0 = parse_escaped();
@@ -7768,11 +7697,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_scheme() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_ALPHA();
@@ -7874,21 +7801,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_authority() {
         var result0;
-
         result0 = parse_srvr();
         if (result0 === null) {
           result0 = parse_reg_name();
         }
         return result0;
       }
-
       function parse_srvr() {
         var result0, result1;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_userinfo();
@@ -7928,10 +7851,8 @@ module.exports = (function(){
         result0 = result0 !== null ? result0 : "";
         return result0;
       }
-
       function parse_reg_name() {
         var result0, result1;
-
         result1 = parse_unreserved();
         if (result1 === null) {
           result1 = parse_escaped();
@@ -8126,10 +8047,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_query() {
         var result0, result1;
-
         result0 = [];
         result1 = parse_uric();
         while (result1 !== null) {
@@ -8138,11 +8057,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SIP_Version() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 3).toLowerCase() === "sip") {
@@ -8227,10 +8144,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_INVITEm() {
         var result0;
-
         if (input.substr(pos, 6) === "INVITE") {
           result0 = "INVITE";
           pos += 6;
@@ -8242,10 +8157,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ACKm() {
         var result0;
-
         if (input.substr(pos, 3) === "ACK") {
           result0 = "ACK";
           pos += 3;
@@ -8257,10 +8170,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_OPTIONSm() {
         var result0;
-
         if (input.substr(pos, 7) === "OPTIONS") {
           result0 = "OPTIONS";
           pos += 7;
@@ -8272,10 +8183,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_BYEm() {
         var result0;
-
         if (input.substr(pos, 3) === "BYE") {
           result0 = "BYE";
           pos += 3;
@@ -8287,10 +8196,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_CANCELm() {
         var result0;
-
         if (input.substr(pos, 6) === "CANCEL") {
           result0 = "CANCEL";
           pos += 6;
@@ -8302,10 +8209,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_REGISTERm() {
         var result0;
-
         if (input.substr(pos, 8) === "REGISTER") {
           result0 = "REGISTER";
           pos += 8;
@@ -8317,10 +8222,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_SUBSCRIBEm() {
         var result0;
-
         if (input.substr(pos, 9) === "SUBSCRIBE") {
           result0 = "SUBSCRIBE";
           pos += 9;
@@ -8332,10 +8235,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_NOTIFYm() {
         var result0;
-
         if (input.substr(pos, 6) === "NOTIFY") {
           result0 = "NOTIFY";
           pos += 6;
@@ -8347,10 +8248,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_REFERm() {
         var result0;
-
         if (input.substr(pos, 5) === "REFER") {
           result0 = "REFER";
           pos += 5;
@@ -8362,11 +8261,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Method() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_INVITEm();
         if (result0 === null) {
@@ -8406,11 +8303,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Status_Line() {
         var result0, result1, result2, result3, result4;
         var pos0;
-
         pos0 = pos;
         result0 = parse_SIP_Version();
         if (result0 !== null) {
@@ -8445,11 +8340,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Status_Code() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_extension_code();
         if (result0 !== null) {
@@ -8461,11 +8354,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_extension_code() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_DIGIT();
         if (result0 !== null) {
@@ -8488,11 +8379,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Reason_Phrase() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result0 = [];
         result1 = parse_reserved();
@@ -8545,11 +8434,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Allow_Events() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_event_type();
         if (result0 !== null) {
@@ -8597,11 +8484,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Call_ID() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_word();
@@ -8648,11 +8533,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Contact() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         result0 = parse_STAR();
         if (result0 === null) {
@@ -8723,11 +8606,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_contact_param() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SIP_URI_noparams();
@@ -8799,11 +8680,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_name_addr() {
         var result0, result1, result2, result3;
         var pos0;
-
         pos0 = pos;
         result0 = parse_display_name();
         result0 = result0 !== null ? result0 : "";
@@ -8833,11 +8712,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_display_name() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_token();
@@ -8900,10 +8777,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_contact_params() {
         var result0;
-
         result0 = parse_c_p_q();
         if (result0 === null) {
           result0 = parse_c_p_expires();
@@ -8913,11 +8788,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_c_p_q() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 1).toLowerCase() === "q") {
@@ -8957,11 +8830,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_c_p_expires() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 7).toLowerCase() === "expires") {
@@ -9001,11 +8872,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_delta_seconds() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_DIGIT();
         if (result1 !== null) {
@@ -9026,11 +8895,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_qvalue() {
         var result0, result1, result2, result3, result4;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         if (input.charCodeAt(pos) === 48) {
@@ -9100,11 +8967,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_generic_param() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_token();
@@ -9150,10 +9015,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_gen_value() {
         var result0;
-
         result0 = parse_token();
         if (result0 === null) {
           result0 = parse_host();
@@ -9163,11 +9026,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Content_Disposition() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_disp_type();
         if (result0 !== null) {
@@ -9215,10 +9076,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_disp_type() {
         var result0;
-
         if (input.substr(pos, 6).toLowerCase() === "render") {
           result0 = input.substr(pos, 6);
           pos += 6;
@@ -9266,21 +9125,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_disp_param() {
         var result0;
-
         result0 = parse_handling_param();
         if (result0 === null) {
           result0 = parse_generic_param();
         }
         return result0;
       }
-
       function parse_handling_param() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 8).toLowerCase() === "handling") {
           result0 = input.substr(pos, 8);
@@ -9333,11 +9188,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Content_Encoding() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -9385,11 +9238,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Content_Length() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_DIGIT();
         if (result1 !== null) {
@@ -9410,11 +9261,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Content_Type() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_media_type();
         if (result0 !== null) {
@@ -9426,11 +9275,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_media_type() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_m_type();
         if (result0 !== null) {
@@ -9490,20 +9337,16 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_m_type() {
         var result0;
-
         result0 = parse_discrete_type();
         if (result0 === null) {
           result0 = parse_composite_type();
         }
         return result0;
       }
-
       function parse_discrete_type() {
         var result0;
-
         if (input.substr(pos, 4).toLowerCase() === "text") {
           result0 = input.substr(pos, 4);
           pos += 4;
@@ -9562,10 +9405,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_composite_type() {
         var result0;
-
         if (input.substr(pos, 7).toLowerCase() === "message") {
           result0 = input.substr(pos, 7);
           pos += 7;
@@ -9591,21 +9432,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_extension_token() {
         var result0;
-
         result0 = parse_token();
         if (result0 === null) {
           result0 = parse_x_token();
         }
         return result0;
       }
-
       function parse_x_token() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 2).toLowerCase() === "x-") {
           result0 = input.substr(pos, 2);
@@ -9630,21 +9467,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_m_subtype() {
         var result0;
-
         result0 = parse_extension_token();
         if (result0 === null) {
           result0 = parse_token();
         }
         return result0;
       }
-
       function parse_m_parameter() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -9667,21 +9500,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_m_value() {
         var result0;
-
         result0 = parse_token();
         if (result0 === null) {
           result0 = parse_quoted_string();
         }
         return result0;
       }
-
       function parse_CSeq() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_CSeq_value();
         if (result0 !== null) {
@@ -9704,11 +9533,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_CSeq_value() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_DIGIT();
         if (result1 !== null) {
@@ -9729,11 +9556,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Expires() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_delta_seconds();
         if (result0 !== null) {
@@ -9744,11 +9569,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Event() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_event_type();
@@ -9804,11 +9627,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_event_type() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token_nodot();
         if (result0 !== null) {
@@ -9872,11 +9693,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_From() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SIP_URI_noparams();
@@ -9941,21 +9760,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_from_param() {
         var result0;
-
         result0 = parse_tag_param();
         if (result0 === null) {
           result0 = parse_generic_param();
         }
         return result0;
       }
-
       function parse_tag_param() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 3).toLowerCase() === "tag") {
@@ -9993,11 +9808,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Max_Forwards() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result1 = parse_DIGIT();
         if (result1 !== null) {
@@ -10018,11 +9831,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Min_Expires() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_delta_seconds();
         if (result0 !== null) {
@@ -10033,11 +9844,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Name_Addr_Header() {
         var result0, result1, result2, result3, result4, result5, result6;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = [];
@@ -10120,18 +9929,14 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Proxy_Authenticate() {
         var result0;
-
         result0 = parse_challenge();
         return result0;
       }
-
       function parse_challenge() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         if (input.substr(pos, 6).toLowerCase() === "digest") {
           result0 = input.substr(pos, 6);
@@ -10202,11 +10007,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_other_challenge() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -10266,11 +10069,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_auth_param() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -10296,10 +10097,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_digest_cln() {
         var result0;
-
         result0 = parse_realm();
         if (result0 === null) {
           result0 = parse_domain();
@@ -10324,11 +10123,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_realm() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 5).toLowerCase() === "realm") {
           result0 = input.substr(pos, 5);
@@ -10359,11 +10156,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_realm_value() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_quoted_string_clean();
         if (result0 !== null) {
@@ -10374,11 +10169,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_domain() {
         var result0, result1, result2, result3, result4, result5, result6;
         var pos0, pos1;
-
         pos0 = pos;
         if (input.substr(pos, 6).toLowerCase() === "domain") {
           result0 = input.substr(pos, 6);
@@ -10476,21 +10269,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_URI() {
         var result0;
-
         result0 = parse_absoluteURI();
         if (result0 === null) {
           result0 = parse_abs_path();
         }
         return result0;
       }
-
       function parse_nonce() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 5).toLowerCase() === "nonce") {
           result0 = input.substr(pos, 5);
@@ -10521,11 +10310,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_nonce_value() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_quoted_string_clean();
         if (result0 !== null) {
@@ -10536,11 +10323,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_opaque() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 6).toLowerCase() === "opaque") {
@@ -10578,11 +10363,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_stale() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         if (input.substr(pos, 5).toLowerCase() === "stale") {
           result0 = input.substr(pos, 5);
@@ -10646,11 +10429,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_algorithm() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 9).toLowerCase() === "algorithm") {
@@ -10711,11 +10492,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_qop_options() {
         var result0, result1, result2, result3, result4, result5, result6;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         if (input.substr(pos, 3).toLowerCase() === "qop") {
           result0 = input.substr(pos, 3);
@@ -10818,11 +10597,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_qop_value() {
         var result0;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 8).toLowerCase() === "auth-int") {
           result0 = input.substr(pos, 8);
@@ -10857,11 +10634,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Proxy_Require() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -10909,11 +10684,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Record_Route() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_rec_route();
@@ -10981,11 +10754,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_rec_route() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_name_addr();
@@ -11054,11 +10825,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Reason() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 3).toLowerCase() === "sip") {
@@ -11119,9 +10888,7 @@ module.exports = (function(){
         if (result0 !== null) {
           result0 = (function(offset, protocol) {
                           data.protocol = protocol.toLowerCase();
-
                           if (!data.params) data.params = {};
-
                           if (data.params.text && data.params.text[0] === '"') {
                             var text = data.params.text;
                             data.text = text.substring(1, text.length-1);
@@ -11134,21 +10901,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_reason_param() {
         var result0;
-
         result0 = parse_reason_cause();
         if (result0 === null) {
           result0 = parse_generic_param();
         }
         return result0;
       }
-
       function parse_reason_cause() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 5).toLowerCase() === "cause") {
@@ -11197,11 +10960,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Require() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -11249,11 +11010,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Route() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_route_param();
         if (result0 !== null) {
@@ -11301,11 +11060,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_route_param() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_name_addr();
         if (result0 !== null) {
@@ -11353,11 +11110,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Subscription_State() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_substate_value();
         if (result0 !== null) {
@@ -11405,11 +11160,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_substate_value() {
         var result0;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 6).toLowerCase() === "active") {
           result0 = input.substr(pos, 6);
@@ -11454,11 +11207,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_subexp_params() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 6).toLowerCase() === "reason") {
@@ -11576,10 +11327,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_event_reason_value() {
         var result0;
-
         if (input.substr(pos, 11).toLowerCase() === "deactivated") {
           result0 = input.substr(pos, 11);
           pos += 11;
@@ -11660,19 +11409,15 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Subject() {
         var result0;
-
         result0 = parse_TEXT_UTF8_TRIM();
         result0 = result0 !== null ? result0 : "";
         return result0;
       }
-
       function parse_Supported() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -11721,11 +11466,9 @@ module.exports = (function(){
         result0 = result0 !== null ? result0 : "";
         return result0;
       }
-
       function parse_To() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SIP_URI_noparams();
@@ -11790,21 +11533,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_to_param() {
         var result0;
-
         result0 = parse_tag_param();
         if (result0 === null) {
           result0 = parse_generic_param();
         }
         return result0;
       }
-
       function parse_Via() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_via_param();
         if (result0 !== null) {
@@ -11852,11 +11591,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_param() {
         var result0, result1, result2, result3, result4, result5;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_sent_protocol();
         if (result0 !== null) {
@@ -11916,10 +11653,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_params() {
         var result0;
-
         result0 = parse_via_ttl();
         if (result0 === null) {
           result0 = parse_via_maddr();
@@ -11938,11 +11673,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_ttl() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 3).toLowerCase() === "ttl") {
@@ -11981,11 +11714,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_maddr() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 5).toLowerCase() === "maddr") {
@@ -12024,11 +11755,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_received() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 8).toLowerCase() === "received") {
@@ -12070,11 +11799,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_branch() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 6).toLowerCase() === "branch") {
@@ -12113,11 +11840,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_response_port() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 5).toLowerCase() === "rport") {
@@ -12170,11 +11895,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_sent_protocol() {
         var result0, result1, result2, result3, result4;
         var pos0;
-
         pos0 = pos;
         result0 = parse_protocol_name();
         if (result0 !== null) {
@@ -12209,11 +11932,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_protocol_name() {
         var result0;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 3).toLowerCase() === "sip") {
           result0 = input.substr(pos, 3);
@@ -12236,11 +11957,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_transport() {
         var result0;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 3).toLowerCase() === "udp") {
           result0 = input.substr(pos, 3);
@@ -12296,11 +12015,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_sent_by() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_via_host();
         if (result0 !== null) {
@@ -12331,11 +12048,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_host() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_IPv4address();
         if (result0 === null) {
@@ -12353,11 +12068,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_via_port() {
         var result0, result1, result2, result3, result4;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_DIGIT();
@@ -12405,11 +12118,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_ttl() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_DIGIT();
@@ -12442,18 +12153,14 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_WWW_Authenticate() {
         var result0;
-
         result0 = parse_challenge();
         return result0;
       }
-
       function parse_Session_Expires() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_s_e_expires();
         if (result0 !== null) {
@@ -12501,11 +12208,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_s_e_expires() {
         var result0;
         var pos0;
-
         pos0 = pos;
         result0 = parse_delta_seconds();
         if (result0 !== null) {
@@ -12516,21 +12221,17 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_s_e_params() {
         var result0;
-
         result0 = parse_s_e_refresher();
         if (result0 === null) {
           result0 = parse_generic_param();
         }
         return result0;
       }
-
       function parse_s_e_refresher() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 9).toLowerCase() === "refresher") {
@@ -12587,11 +12288,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_extension_header() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_token();
         if (result0 !== null) {
@@ -12614,10 +12313,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_header_value() {
         var result0, result1;
-
         result0 = [];
         result1 = parse_TEXT_UTF8char();
         if (result1 === null) {
@@ -12638,10 +12335,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_message_body() {
         var result0, result1;
-
         result0 = [];
         result1 = parse_OCTET();
         while (result1 !== null) {
@@ -12650,11 +12345,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uuid_URI() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 5) === "uuid:") {
           result0 = "uuid:";
@@ -12679,11 +12372,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_uuid() {
         var result0, result1, result2, result3, result4, result5, result6, result7, result8;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_hex8();
@@ -12782,11 +12473,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hex4() {
         var result0, result1, result2, result3;
         var pos0;
-
         pos0 = pos;
         result0 = parse_HEXDIG();
         if (result0 !== null) {
@@ -12815,11 +12504,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hex8() {
         var result0, result1;
         var pos0;
-
         pos0 = pos;
         result0 = parse_hex4();
         if (result0 !== null) {
@@ -12836,11 +12523,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_hex12() {
         var result0, result1, result2;
         var pos0;
-
         pos0 = pos;
         result0 = parse_hex4();
         if (result0 !== null) {
@@ -12863,11 +12548,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Refer_To() {
         var result0, result1, result2, result3;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_SIP_URI_noparams();
@@ -12930,11 +12613,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_Replaces() {
         var result0, result1, result2, result3;
         var pos0, pos1;
-
         pos0 = pos;
         result0 = parse_call_id();
         if (result0 !== null) {
@@ -12982,11 +12663,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_call_id() {
         var result0, result1, result2;
         var pos0, pos1, pos2;
-
         pos0 = pos;
         pos1 = pos;
         result0 = parse_word();
@@ -13033,10 +12712,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_replaces_param() {
         var result0;
-
         result0 = parse_to_tag();
         if (result0 === null) {
           result0 = parse_from_tag();
@@ -13049,11 +12726,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_to_tag() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 6) === "to-tag") {
@@ -13092,11 +12767,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_from_tag() {
         var result0, result1, result2;
         var pos0, pos1;
-
         pos0 = pos;
         pos1 = pos;
         if (input.substr(pos, 8) === "from-tag") {
@@ -13135,11 +12808,9 @@ module.exports = (function(){
         }
         return result0;
       }
-
       function parse_early_flag() {
         var result0;
         var pos0;
-
         pos0 = pos;
         if (input.substr(pos, 10) === "early-only") {
           result0 = "early-only";
@@ -13159,11 +12830,8 @@ module.exports = (function(){
         }
         return result0;
       }
-
-
       function cleanupExpected(expected) {
         expected.sort();
-
         var lastExpected = null;
         var cleanExpected = [];
         for (var i = 0; i < expected.length; i++) {
@@ -13174,7 +12842,6 @@ module.exports = (function(){
         }
         return cleanExpected;
       }
-
       function computeErrorPosition() {
         /*
          * The first idea was to use |String.split| to break the input up to the
@@ -13182,11 +12849,9 @@ module.exports = (function(){
          * there. However IE's |split| implementation is so broken that it was
          * enough to prevent it.
          */
-
         var line = 1;
         var column = 1;
         var seenCR = false;
-
         for (var i = 0; i < Math.max(pos, rightmostFailuresPos); i++) {
           var ch = input.charAt(i);
           if (ch === "\n") {
@@ -13202,19 +12867,12 @@ module.exports = (function(){
             seenCR = false;
           }
         }
-
         return { line: line, column: column };
       }
-
-
         var URI = require('./URI');
         var NameAddrHeader = require('./NameAddrHeader');
-
         var data = {};
-
-
       var result = parseFunctions[startRule]();
-
       /*
        * The parser is now in one of the following three states:
        *
@@ -13243,7 +12901,6 @@ module.exports = (function(){
         var offset = Math.max(pos, rightmostFailuresPos);
         var found = offset < input.length ? input.charAt(offset) : null;
         var errorPosition = computeErrorPosition();
-
         new this.SyntaxError(
           cleanupExpected(rightmostFailuresExpected),
           found,
@@ -13253,20 +12910,15 @@ module.exports = (function(){
         );
         return -1;
       }
-
       return data;
     },
-
     /* Returns the parser source code. */
     toSource: function() { return this._source; }
   };
-
   /* Thrown when a parser encounters a syntax error. */
-
   result.SyntaxError = function(expected, found, offset, line, column) {
     function buildMessage(expected, found) {
       var expectedHumanized, foundHumanized;
-
       switch (expected.length) {
         case 0:
           expectedHumanized = "end of input";
@@ -13279,12 +12931,9 @@ module.exports = (function(){
             + " or "
             + expected[expected.length - 1];
       }
-
       foundHumanized = found ? quote(found) : "end of input";
-
       return "Expected " + expectedHumanized + " but " + foundHumanized + " found.";
     }
-
     this.name = "SyntaxError";
     this.expected = expected;
     this.found = found;
@@ -13293,23 +12942,14 @@ module.exports = (function(){
     this.line = line;
     this.column = column;
   };
-
   result.SyntaxError.prototype = Error.prototype;
-
   return result;
 })();
-
-},{"./NameAddrHeader":9,"./URI":23}],7:[function(require,module,exports){
+},{"./NameAddrHeader":9,"./URI":24}],7:[function(require,module,exports){
 /**
  * Dependencies.
  */
-
 var debug = require('debug')('JsSIP');
-
-/*Hack to get JsSIP logs enabled*/
-var jssip_debug = require('debug');
-jssip_debug.enable('JsSIP:*');
-
 var pkg = require('../package.json');
 
 debug('version %s', pkg.version);
@@ -13322,7 +12962,7 @@ var UA = require('./UA');
 var URI = require('./URI');
 var NameAddrHeader = require('./NameAddrHeader');
 var Grammar = require('./Grammar');
-var VoxboneLogger = require('./VoxboneLogger.js');
+var WebSocketInterface = require('./WebSocketInterface');
 
 
 /**
@@ -13335,13 +12975,12 @@ var JsSIP = module.exports = {
   UA: UA,
   URI: URI,
   NameAddrHeader: NameAddrHeader,
+  WebSocketInterface: WebSocketInterface,
   Grammar: Grammar,
   // Expose the debug module.
   debug: require('debug'),
   // Expose the rtcninja module.
-  rtcninja: rtcninja,
-  // Expose the voxbonelogger module.
-  VoxboneLogger: VoxboneLogger,
+  rtcninja: rtcninja
 };
 
 
@@ -13355,7 +12994,7 @@ Object.defineProperties(JsSIP, {
   }
 });
 
-},{"../package.json":49,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":22,"./URI":23,"./Utils":24,"./VoxboneLogger.js":25,"debug":32,"rtcninja":37}],8:[function(require,module,exports){
+},{"../package.json":40,"./Constants":1,"./Exceptions":5,"./Grammar":6,"./NameAddrHeader":9,"./UA":23,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"debug":33,"rtcninja":43}],8:[function(require,module,exports){
 module.exports = Message;
 
 
@@ -13574,7 +13213,7 @@ Message.prototype.newMessage = function(originator, request) {
   });
 };
 
-},{"./Constants":1,"./Exceptions":5,"./RequestSender":17,"./SIPMessage":18,"./Transactions":20,"./Utils":24,"events":27,"util":31}],9:[function(require,module,exports){
+},{"./Constants":1,"./Exceptions":5,"./RequestSender":17,"./SIPMessage":18,"./Transactions":21,"./Utils":25,"events":28,"util":32}],9:[function(require,module,exports){
 module.exports = NameAddrHeader;
 
 
@@ -13684,7 +13323,7 @@ NameAddrHeader.parse = function(name_addr_header) {
   }
 };
 
-},{"./Grammar":6,"./URI":23}],10:[function(require,module,exports){
+},{"./Grammar":6,"./URI":24}],10:[function(require,module,exports){
 var Parser = {};
 
 module.exports = Parser;
@@ -13694,8 +13333,7 @@ module.exports = Parser;
  * Dependencies.
  */
 var debugerror = require('debug')('JsSIP:ERROR:Parser');
-var logger = require('./VoxboneLogger.js');
-debugerror.log = logger.logerror.bind(console);
+debugerror.log = console.warn.bind(console);
 var Grammar = require('./Grammar');
 var SIPMessage = require('./SIPMessage');
 
@@ -13939,7 +13577,7 @@ Parser.parseMessage = function(data, ua) {
     }
     // data.indexOf returned -1 due to a malformed message.
     else if(headerEnd === -1) {
-      parsed.error('parseMessage() | malformed message');
+      debugerror('parseMessage() | malformed message');
       return;
     }
 
@@ -13967,7 +13605,7 @@ Parser.parseMessage = function(data, ua) {
   return message;
 };
 
-},{"./Grammar":6,"./SIPMessage":18,"./VoxboneLogger.js":25,"debug":32}],11:[function(require,module,exports){
+},{"./Grammar":6,"./SIPMessage":18,"debug":33}],11:[function(require,module,exports){
 module.exports = RTCSession;
 
 
@@ -13998,10 +13636,7 @@ var util = require('util');
 var events = require('events');
 var debug = require('debug')('JsSIP:RTCSession');
 var debugerror = require('debug')('JsSIP:ERROR:RTCSession');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
-debugerror.log = logger.logerror.bind(console);
-
+debugerror.log = console.warn.bind(console);
 var rtcninja = require('rtcninja');
 var sdp_transform = require('sdp-transform');
 var JsSIP_C = require('./Constants');
@@ -14038,11 +13673,6 @@ function RTCSession(ua) {
 
   // is late SDP being negotiated
   this.late_sdp = false;
-
-  // last SDP sent
-  this.last_sdp = null;
-  //Treat every reinvite as session refresh
-  this.reinvite_as_sess_ref = true;
 
   // Default rtcOfferConstraints and rtcAnswerConstrainsts (passed in connect() or answer()).
   this.rtcOfferConstraints = null;
@@ -14086,6 +13716,9 @@ function RTCSession(ua) {
     refresher: false,
     timer: null  // A setTimeout.
   };
+
+  // Map of ReferSubscriber instances indexed by the REFER's CSeq number
+  this.referSubscribers = {};
 
   // Custom session empty object for high level use
   this.data = {};
@@ -14541,9 +14174,20 @@ RTCSession.prototype.answer = function(options) {
       self.connection.addStream(stream);
     }
 
+    // If it's an incoming INVITE without SDP notify the app with the
+    // RTCPeerConnection so it can do stuff on it before generating the offer.
+    if (! self.request.body) {
+      self.emit('peerconnection', {
+        peerconnection: self.connection
+      });
+    }
+
     if (! self.late_sdp) {
+      var e = {originator:'remote', type:'offer', sdp:request.body};
+      self.emit('sdp', e);
+
       self.connection.setRemoteDescription(
-        new rtcninja.RTCSessionDescription({type:'offer', sdp:request.body}),
+        new rtcninja.RTCSessionDescription({type:'offer', sdp:e.sdp}),
         // success
         remoteDescriptionSucceededOrNotNeeded,
         // failure
@@ -14636,7 +14280,7 @@ RTCSession.prototype.terminate = function(options) {
     case C.STATUS_NULL:
     case C.STATUS_INVITE_SENT:
     case C.STATUS_1XX_RECEIVED:
-      debug('canceling sesssion');
+      debug('canceling session');
 
       if (status_code && (status_code < 200 || status_code >= 700)) {
         throw new TypeError('Invalid status_code: '+ status_code);
@@ -15131,13 +14775,12 @@ RTCSession.prototype.renegotiate = function(options, done) {
 RTCSession.prototype.refer = function(target, options) {
   debug('refer()');
 
-  var originalTarget = target;
+  var self = this,
+    originalTarget = target,
+    referSubscriber,
+    id;
 
   if (this.status !== C.STATUS_WAITING_FOR_ACK && this.status !== C.STATUS_CONFIRMED) {
-    return false;
-  }
-
-  if (this.referSubscriber) {
     return false;
   }
 
@@ -15147,8 +14790,25 @@ RTCSession.prototype.refer = function(target, options) {
     throw new TypeError('Invalid target: '+ originalTarget);
   }
 
-  this.referSubscriber = new RTCSession_ReferSubscriber(this);
-  this.referSubscriber.sendRefer(target, options);
+  referSubscriber = new RTCSession_ReferSubscriber(this);
+  referSubscriber.sendRefer(target, options);
+
+  // Store in the map
+  id = referSubscriber.outgoingRequest.cseq;
+  this.referSubscribers[id] = referSubscriber;
+
+  // Listen for ending events so we can remove it from the map
+  referSubscriber.on('requestFailed', function() {
+    delete self.referSubscribers[id];
+  });
+  referSubscriber.on('accepted', function() {
+    delete self.referSubscribers[id];
+  });
+  referSubscriber.on('failed', function() {
+    delete self.referSubscribers[id];
+  });
+
+  return referSubscriber;
 };
 
 /**
@@ -15181,36 +14841,51 @@ RTCSession.prototype.receiveRequest = function(request) {
     // Requests arriving here are in-dialog requests.
     switch(request.method) {
       case JsSIP_C.ACK:
-        if(this.status === C.STATUS_WAITING_FOR_ACK) {
-          clearTimeout(this.timers.ackTimer);
-          clearTimeout(this.timers.invite2xxTimer);
+        if (this.status !== C.STATUS_WAITING_FOR_ACK) {
+          return;
+        }
 
-          if (this.late_sdp) {
-            if (!request.body) {
-              ended.call(this, 'remote', request, JsSIP_C.causes.MISSING_SDP);
-              break;
-            }
+        // Update signaling status.
+        this.status = C.STATUS_CONFIRMED;
 
-            this.connection.setRemoteDescription(
-              new rtcninja.RTCSessionDescription({type:'answer', sdp:request.body}),
-              // success
-              function() {
-                self.status = C.STATUS_CONFIRMED;
-              },
-              // failure
-              function() {
-                ended.call(self, 'remote', request, JsSIP_C.causes.BAD_MEDIA_DESCRIPTION);
+        clearTimeout(this.timers.ackTimer);
+        clearTimeout(this.timers.invite2xxTimer);
+
+        if (this.late_sdp) {
+          if (!request.body) {
+            this.terminate({
+              cause: JsSIP_C.causes.MISSING_SDP,
+              status_code: 400
+            });
+            break;
+          }
+
+          var e = {originator:'remote', type:'answer', sdp:request.body};
+          this.emit('sdp', e);
+
+          this.connection.setRemoteDescription(
+            new rtcninja.RTCSessionDescription({type:'answer', sdp:e.sdp}),
+            // success
+            function() {
+              if (!self.is_confirmed) {
+                confirmed.call(self, 'remote', request);
               }
-            );
-          }
-          else {
-            this.status = C.STATUS_CONFIRMED;
-          }
-
-          if (this.status === C.STATUS_CONFIRMED && !this.is_confirmed) {
+            },
+            // failure
+            function() {
+              self.terminate({
+                cause: JsSIP_C.causes.BAD_MEDIA_DESCRIPTION,
+                status_code: 488
+              });
+            }
+          );
+        }
+        else {
+          if (!this.is_confirmed) {
             confirmed.call(this, 'remote', request);
           }
         }
+
         break;
       case JsSIP_C.BYE:
         if(this.status === C.STATUS_CONFIRMED) {
@@ -15414,7 +15089,7 @@ function createRTCConnection(pcConfig, rtcConstraints) {
   };
 
   this.connection.oniceconnectionstatechange = function(event, state) {
-    self.emit('iceconnetionstatechange', {state: state});
+    self.emit('iceconnectionstatechange', {state: state});
 
     // TODO: Do more with different states.
     if (state === 'failed') {
@@ -15471,7 +15146,12 @@ function createLocalDescription(type, onSuccess, onFailure, constraints) {
       if (! candidate) {
         connection.onicecandidate = null;
         self.rtcReady = true;
-        if (onSuccess) { onSuccess(connection.localDescription.sdp); }
+
+        if (onSuccess) {
+          var e = {originator:'local', type:type, sdp:connection.localDescription.sdp};
+          self.emit('sdp', e);
+          onSuccess(e.sdp);
+        }
         onSuccess = null;
       }
     };
@@ -15481,7 +15161,12 @@ function createLocalDescription(type, onSuccess, onFailure, constraints) {
       function() {
         if (connection.iceGatheringState === 'complete') {
           self.rtcReady = true;
-          if (onSuccess) { onSuccess(connection.localDescription.sdp); }
+
+          if (onSuccess) {
+            var e = {originator:'local', type:type, sdp:connection.localDescription.sdp};
+            self.emit('sdp', e);
+            onSuccess(e.sdp);
+          }
           onSuccess = null;
         }
       },
@@ -15627,31 +15312,18 @@ function receiveReinvite(request) {
       }
     }
 
-    if (self.reinvite_as_sess_ref) {
-        var extraHeaders = ['Contact: ' + self.contact];
-        handleSessionTimersInIncomingRequest.call(self, request, extraHeaders);
+    var e = {originator:'remote', type:'offer', sdp:request.body};
+    this.emit('sdp', e);
 
-        request.reply(200, null, extraHeaders, null,
-          function() {
-            self.status = C.STATUS_WAITING_FOR_ACK;
-            setInvite2xxTimer.call(self, request, null);
-            setACKTimer.call(self);
-          }
-        );
-
-        return;
-    }
-    else {
-      this.connection.setRemoteDescription(
-          new rtcninja.RTCSessionDescription({type:'offer', sdp:request.body}),
-          // success
-          answer,
-          // failure
-          function() {
-            request.reply(488);
-          }
-      );
-    }
+    this.connection.setRemoteDescription(
+      new rtcninja.RTCSessionDescription({type:'offer', sdp:e.sdp}),
+      // success
+      answer,
+      // failure
+      function() {
+        request.reply(488);
+      }
+    );
   }
   else {
     this.late_sdp = true;
@@ -15785,8 +15457,11 @@ function receiveUpdate(request) {
     }
   }
 
+  var e = {originator:'remote', type:'offer', sdp:request.body};
+  this.emit('sdp', e);
+
   this.connection.setRemoteDescription(
-    new rtcninja.RTCSessionDescription({type:'offer', sdp:request.body}),
+    new rtcninja.RTCSessionDescription({type:'offer', sdp:e.sdp}),
     // success
     function() {
       if (self.remoteHold === true && hold === false) {
@@ -15908,13 +15583,27 @@ function receiveNotify(request) {
 
   if (typeof request.event === undefined) {
     request.reply(400);
-  } else if (request.event.event !== 'refer') {
-    request.reply(489);
-  } else if (!this.referSubscriber) {
-    request.reply(481, 'Subscription does not exist');
-  } else {
-    this.referSubscriber.receiveNotify(request);
-    request.reply(200);
+  }
+
+  switch (request.event.event) {
+    case 'refer': {
+      var id = request.event.params.id;
+      var referSubscriber = this.referSubscribers[id];
+
+      if (!referSubscriber) {
+        request.reply(481, 'Subscription does not exist');
+        return;
+      }
+
+      referSubscriber.receiveNotify(request);
+      request.reply(200);
+
+      break;
+    }
+
+    default: {
+      request.reply(489);
+    }
   }
 }
 
@@ -16015,9 +15704,7 @@ function sendInitialRequest(mediaConstraints, rtcOfferConstraints, mediaStream) 
   function rtcSucceeded(desc) {
     if (self.isCanceled || self.status === C.STATUS_TERMINATED) { return; }
 
-    desc = desc.replace(/\s+RTP\/SAVPF\s+/gm, ' UDP/TLS/RTP/SAVPF ');
     self.request.body = desc;
-    self.last_sdp = desc;
     self.status = C.STATUS_INVITE_SENT;
 
     // Emit 'sending' so the app can mangle the body before the request
@@ -16042,7 +15729,7 @@ function sendInitialRequest(mediaConstraints, rtcOfferConstraints, mediaStream) 
 function receiveInviteResponse(response) {
   debug('receiveInviteResponse()');
 
-  var cause, dialog,
+  var cause, dialog, e,
     self = this;
 
   // Handle 2XX retransmissions and responses from forked requests
@@ -16132,8 +15819,11 @@ function receiveInviteResponse(response) {
         break;
       }
 
+      e = {originator:'remote', type:'pranswer', sdp:response.body};
+      this.emit('sdp', e);
+
       this.connection.setRemoteDescription(
-        new rtcninja.RTCSessionDescription({type:'pranswer', sdp:response.body}),
+        new rtcninja.RTCSessionDescription({type:'pranswer', sdp:e.sdp}),
         // success
         null,
         // failure
@@ -16155,11 +15845,11 @@ function receiveInviteResponse(response) {
         break;
       }
 
-      response.body = response.body.replace(/\s+UDP\/TLS\/RTP\/SAVPF\s+/,' RTP/SAVPF ');
-      response.body = response.body.replace(/:SHA-256 /,':sha-256 ');
+      e = {originator:'remote', type:'answer', sdp:response.body};
+      this.emit('sdp', e);
 
       this.connection.setRemoteDescription(
-        new rtcninja.RTCSessionDescription({type:'answer', sdp:response.body}),
+        new rtcninja.RTCSessionDescription({type:'answer', sdp:e.sdp}),
         // success
         function() {
           // Handle Session Timers.
@@ -16266,8 +15956,11 @@ function sendReinvite(options) {
       return;
     }
 
+    var e = {originator:'remote', type:'answer', sdp:response.body};
+    self.emit('sdp', e);
+
     self.connection.setRemoteDescription(
-      new rtcninja.RTCSessionDescription({type:'answer', sdp:response.body}),
+      new rtcninja.RTCSessionDescription({type:'answer', sdp:e.sdp}),
       // success
       function() {
         if (eventHandlers.succeeded) { eventHandlers.succeeded(response); }
@@ -16396,8 +16089,11 @@ function sendUpdate(options) {
         return;
       }
 
+      var e = {originator:'remote', type:'answer', sdp:response.body};
+      self.emit('sdp', e);
+
       self.connection.setRemoteDescription(
-        new rtcninja.RTCSessionDescription({type:'answer', sdp:response.body}),
+        new rtcninja.RTCSessionDescription({type:'answer', sdp:e.sdp}),
         // success
         function() {
           if (eventHandlers.succeeded) { eventHandlers.succeeded(response); }
@@ -16767,7 +16463,7 @@ function onunmute(options) {
   });
 }
 
-},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":19,"./Transactions":20,"./Utils":24,"./VoxboneLogger.js":25,"debug":32,"events":27,"rtcninja":37,"sdp-transform":43,"util":31}],12:[function(require,module,exports){
+},{"./Constants":1,"./Dialog":2,"./Exceptions":5,"./RTCSession/DTMF":12,"./RTCSession/ReferNotifier":13,"./RTCSession/ReferSubscriber":14,"./RTCSession/Request":15,"./RequestSender":17,"./SIPMessage":18,"./Timers":20,"./Transactions":21,"./Utils":25,"debug":33,"events":28,"rtcninja":43,"sdp-transform":37,"util":32}],12:[function(require,module,exports){
 module.exports = DTMF;
 
 
@@ -16931,7 +16627,7 @@ DTMF.prototype.init_incoming = function(request) {
   }
 };
 
-},{"../Constants":1,"../Exceptions":5,"../RTCSession":11,"debug":32}],13:[function(require,module,exports){
+},{"../Constants":1,"../Exceptions":5,"../RTCSession":11,"debug":33}],13:[function(require,module,exports){
 module.exports = ReferNotifier;
 
 
@@ -16993,7 +16689,7 @@ ReferNotifier.prototype.notify = function(code, reason) {
   });
 };
 
-},{"../Constants":1,"./Request":15,"debug":32}],14:[function(require,module,exports){
+},{"../Constants":1,"./Request":15,"debug":33}],14:[function(require,module,exports){
 module.exports = ReferSubscriber;
 
 
@@ -17014,8 +16710,9 @@ var RTCSession_Request = require('./Request');
 
 function ReferSubscriber(session) {
   this.session = session;
-
   this.timer = null;
+  // Instance of REFER OutgoingRequest
+  this.outgoingRequest = null;
 
   events.EventEmitter.call(this);
 }
@@ -17056,9 +16753,8 @@ ReferSubscriber.prototype.sendRefer = function(target, options) {
   var request = new RTCSession_Request(this.session, JsSIP_C.REFER);
 
   this.timer = setTimeout(function() {
-      removeSubscriber.call(self);
-    }, C.expires * 1000
-  );
+    removeSubscriber.call(self);
+  }, C.expires * 1000);
 
   request.send({
     extraHeaders: extraHeaders,
@@ -17097,6 +16793,8 @@ ReferSubscriber.prototype.sendRefer = function(target, options) {
       }
     }
   });
+
+  this.outgoingRequest = request.outgoingRequest;
 };
 
 ReferSubscriber.prototype.receiveNotify = function(request) {
@@ -17119,14 +16817,14 @@ ReferSubscriber.prototype.receiveNotify = function(request) {
     case /^100$/.test(status_line.status_code):
       this.emit('trying', {
         request: request,
-        satus_line: status_line
+        status_line: status_line
       });
       break;
 
     case /^1[0-9]{2}$/.test(status_line.status_code):
       this.emit('progress', {
         request: request,
-        satus_line: status_line
+        status_line: status_line
       });
       break;
 
@@ -17134,7 +16832,7 @@ ReferSubscriber.prototype.receiveNotify = function(request) {
       removeSubscriber.call(this);
       this.emit('accepted', {
         request: request,
-        satus_line: status_line
+        status_line: status_line
       });
       break;
 
@@ -17142,7 +16840,7 @@ ReferSubscriber.prototype.receiveNotify = function(request) {
       removeSubscriber.call(this);
       this.emit('failed', {
         request: request,
-        satus_line: status_line
+        status_line: status_line
       });
       break;
   }
@@ -17155,7 +16853,7 @@ function removeSubscriber() {
   this.session.referSubscriber = null;
 }
 
-},{"../Constants":1,"../Grammar":6,"./Request":15,"debug":32,"events":27,"util":31}],15:[function(require,module,exports){
+},{"../Constants":1,"../Grammar":6,"./Request":15,"debug":33,"events":28,"util":32}],15:[function(require,module,exports){
 module.exports = Request;
 
 /**
@@ -17174,6 +16872,8 @@ function Request(session, method) {
 
   this.session = session;
   this.method = method;
+  // Instance of OutgoingRequest
+  this.outgoingRequest = null;
 
   // Check RTCSession Status
   if (this.session.status !== RTCSession.C.STATUS_1XX_RECEIVED &&
@@ -17203,7 +16903,7 @@ Request.prototype.send = function(options) {
 
   this.eventHandlers = options.eventHandlers || {};
 
-  this.session.dialog.sendRequest(this, this.method, {
+  this.outgoingRequest = this.session.dialog.sendRequest(this, this.method, {
     extraHeaders: extraHeaders,
     body: body
   });
@@ -17243,7 +16943,7 @@ Request.prototype.onDialogError = function() {
   if (this.eventHandlers.onDialogError) { this.eventHandlers.onDialogError(); }
 };
 
-},{"../Constants":1,"../Exceptions":5,"../RTCSession":11,"debug":32}],16:[function(require,module,exports){
+},{"../Constants":1,"../Exceptions":5,"../RTCSession":11,"debug":33}],16:[function(require,module,exports){
 module.exports = Registrator;
 
 
@@ -17251,8 +16951,6 @@ module.exports = Registrator;
  * Dependecies
  */
 var debug = require('debug')('JsSIP:Registrator');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
 var Utils = require('./Utils');
 var JsSIP_C = require('./Constants');
 var SIPMessage = require('./SIPMessage');
@@ -17553,7 +17251,7 @@ Registrator.prototype = {
 };
 
 
-},{"./Constants":1,"./RequestSender":17,"./SIPMessage":18,"./Utils":24,"./VoxboneLogger.js":25,"debug":32}],17:[function(require,module,exports){
+},{"./Constants":1,"./RequestSender":17,"./SIPMessage":18,"./Utils":25,"debug":33}],17:[function(require,module,exports){
 module.exports = RequestSender;
 
 
@@ -17561,8 +17259,6 @@ module.exports = RequestSender;
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:RequestSender');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
 var JsSIP_C = require('./Constants');
 var UA = require('./UA');
 var DigestAuthentication = require('./DigestAuthentication');
@@ -17574,7 +17270,7 @@ function RequestSender(applicant, ua) {
   this.applicant = applicant;
   this.method = applicant.request.method;
   this.request = applicant.request;
-  this.credentials = null;
+  this.auth = null;
   this.challenged = false;
   this.staled = false;
 
@@ -17600,6 +17296,7 @@ RequestSender.prototype = {
       default:
         this.clientTransaction = new Transactions.NonInviteClientTransaction(this, this.request, this.ua.transport);
     }
+
     this.clientTransaction.send();
   },
 
@@ -17624,14 +17321,16 @@ RequestSender.prototype = {
   * Authenticate request if needed or pass the response back to the applicant.
   */
   receiveResponse: function(response) {
-    var cseq, challenge, authorization_header_name,
+    var
+      cseq, challenge, authorization_header_name,
       status_code = response.status_code;
 
     /*
     * Authentication
     * Authenticate once. _challenged_ flag used to avoid infinite authentications.
     */
-    if ((status_code === 401 || status_code === 407) && this.ua.configuration.password !== null) {
+    if ((status_code === 401 || status_code === 407) &&
+        (this.ua.configuration.password !== null || this.ua.configuration.ha1 !== null)) {
 
       // Get and parse the appropriate WWW-Authenticate or Proxy-Authenticate header.
       if (response.status_code === 401) {
@@ -17643,23 +17342,32 @@ RequestSender.prototype = {
       }
 
       // Verify it seems a valid challenge.
-      if (! challenge) {
+      if (!challenge) {
         debug(response.status_code + ' with wrong or missing challenge, cannot authenticate');
         this.applicant.receiveResponse(response);
         return;
       }
 
       if (!this.challenged || (!this.staled && challenge.stale === true)) {
-        if (!this.credentials) {
-          this.credentials = new DigestAuthentication(this.ua);
+        if (!this.auth) {
+          this.auth = new DigestAuthentication({
+            username : this.ua.configuration.authorization_user,
+            password : this.ua.configuration.password,
+            realm    : this.ua.configuration.realm,
+            ha1      : this.ua.configuration.ha1
+          });
         }
 
         // Verify that the challenge is really valid.
-        if (!this.credentials.authenticate(this.request, challenge)) {
+        if (!this.auth.authenticate(this.request, challenge)) {
           this.applicant.receiveResponse(response);
           return;
         }
         this.challenged = true;
+
+        // Update ha1 and realm in the UA.
+        this.ua.set('realm', this.auth.get('realm'));
+        this.ua.set('ha1', this.auth.get('ha1'));
 
         if (challenge.stale) {
           this.staled = true;
@@ -17667,15 +17375,18 @@ RequestSender.prototype = {
 
         if (response.method === JsSIP_C.REGISTER) {
           cseq = this.applicant.cseq += 1;
-        } else if (this.request.dialog){
+        } else if (this.request.dialog) {
           cseq = this.request.dialog.local_seqnum += 1;
         } else {
           cseq = this.request.cseq + 1;
-          this.request.cseq = cseq;
         }
+
+        this.request = this.applicant.request = this.request.clone();
+
+        this.request.cseq = cseq;
         this.request.setHeader('cseq', cseq +' '+ this.method);
 
-        this.request.setHeader(authorization_header_name, this.credentials.toString());
+        this.request.setHeader(authorization_header_name, this.auth.toString());
         this.send();
       } else {
         this.applicant.receiveResponse(response);
@@ -17686,7 +17397,7 @@ RequestSender.prototype = {
   }
 };
 
-},{"./Constants":1,"./DigestAuthentication":4,"./Transactions":20,"./UA":22,"./VoxboneLogger.js":25,"debug":32}],18:[function(require,module,exports){
+},{"./Constants":1,"./DigestAuthentication":4,"./Transactions":21,"./UA":23,"debug":33}],18:[function(require,module,exports){
 module.exports = {
   OutgoingRequest: OutgoingRequest,
   IncomingRequest: IncomingRequest,
@@ -17699,8 +17410,6 @@ module.exports = {
  */
 var debug = require('debug')('JsSIP:SIPMessage');
 var sdp_transform = require('sdp-transform');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
 var JsSIP_C = require('./Constants');
 var Utils = require('./Utils');
 var NameAddrHeader = require('./NameAddrHeader');
@@ -17743,8 +17452,8 @@ function OutgoingRequest(method, ruri, ua, params, extraHeaders, body) {
   // Route
   if (params.route_set) {
     this.setHeader('route', params.route_set);
-  } else if (ua.configuration.use_preloaded_route){
-    this.setHeader('route', ua.transport.server.sip_uri);
+  } else if (ua.configuration.use_preloaded_route) {
+    this.setHeader('route', '<' + ua.transport.sip_uri + ';lr>');
   }
 
   // Via
@@ -17956,6 +17665,24 @@ OutgoingRequest.prototype = {
     }
 
     return msg;
+  },
+
+  clone: function() {
+    var request = new OutgoingRequest(this.method, this.ruri, this.ua);
+
+    Object.keys(this.headers).forEach(function(name) {
+      request.headers[name] = this.headers[name].slice();
+    }, this);
+
+    request.body = this.body;
+    request.extraHeaders = this.extraHeaders && this.extraHeaders.slice() || [];
+
+    request.to = this.to;
+    request.from = this.from;
+    request.call_id = this.call_id;
+    request.cseq = this.cseq;
+
+    return request;
   }
 };
 
@@ -18296,7 +18023,86 @@ function IncomingResponse() {
 
 IncomingResponse.prototype = new IncomingMessage();
 
-},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":24,"./VoxboneLogger.js":25,"debug":32,"sdp-transform":43}],19:[function(require,module,exports){
+},{"./Constants":1,"./Grammar":6,"./NameAddrHeader":9,"./Utils":25,"debug":33,"sdp-transform":37}],19:[function(require,module,exports){
+module.exports = Socket;
+
+/**
+ * Interface documentation: http://jssip.net/documentation/$last_version/api/socket/
+ *
+ * interface Socket {
+ *  attribute String via_transport
+ *  attribute String url
+ *  attribute String sip_uri
+ *
+ *  method connect();
+ *  method disconnect();
+ *  method send(data);
+ *
+ *  attribute EventHandler onconnect
+ *  attribute EventHandler ondisconnect
+ *  attribute EventHandler ondata
+ * }
+ *
+ */
+
+
+/**
+ * Dependencies.
+ */
+var Utils = require('./Utils');
+var Grammar = require('./Grammar');
+var debugerror = require('debug')('JsSIP:ERROR:Socket');
+debugerror.log = console.warn.bind(console);
+
+function Socket() {}
+
+Socket.isSocket = function(socket) {
+  // Ignore if an array is given
+  if (Array.isArray(socket)) {
+    return false;
+  }
+
+  if (typeof socket === 'undefined') {
+    debugerror('undefined JsSIP.Socket instance');
+    return false;
+  }
+
+  // Check Properties
+  try {
+    if (!Utils.isString(socket.url)) {
+      debugerror('missing or invalid JsSIP.Socket url property');
+      throw new Error();
+    }
+
+    if (!Utils.isString(socket.via_transport)) {
+      debugerror('missing or invalid JsSIP.Socket via_transport property');
+      throw new Error();
+    }
+
+    if (Grammar.parse(socket.sip_uri, 'SIP_URI') === -1) {
+      debugerror('missing or invalid JsSIP.Socket sip_uri property');
+      throw new Error();
+    }
+  } catch(e) {
+    return false;
+  }
+
+  // Check Methods
+  try {
+    ['connect', 'disconnect', 'send'].forEach(function(method) {
+      if (!Utils.isFunction(socket[method])) {
+        debugerror('missing or invalid JsSIP.Socket method: ' + method);
+        throw new Error();
+      }
+    });
+  } catch(e) {
+    return false;
+  }
+
+  return true;
+};
+
+},{"./Grammar":6,"./Utils":25,"debug":33}],20:[function(require,module,exports){
 var T1 = 500,
   T2 = 4000,
   T4 = 5000;
@@ -18321,7 +18127,7 @@ var Timers = {
 
 module.exports = Timers;
 
-},{}],20:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 module.exports = {
   C: null,
   NonInviteClientTransaction: NonInviteClientTransaction,
@@ -18366,20 +18172,12 @@ var debugict = require('debug')('JsSIP:InviteClientTransaction');
 var debugact = require('debug')('JsSIP:AckClientTransaction');
 var debugnist = require('debug')('JsSIP:NonInviteServerTransaction');
 var debugist = require('debug')('JsSIP:InviteServerTransaction');
-var logger = require('./VoxboneLogger.js');
-debugnict.log = logger.loginfo.bind(console);
-debugict.log = logger.loginfo.bind(console);
-debugact.log = logger.loginfo.bind(console);
-debugnist.log = logger.loginfo.bind(console);
-debugist.log = logger.loginfo.bind(console);
-
 var JsSIP_C = require('./Constants');
 var Timers = require('./Timers');
 
 
 function NonInviteClientTransaction(request_sender, request, transport) {
-  var via,
-    via_transport;
+  var via;
 
   this.type = C.NON_INVITE_CLIENT;
   this.transport = transport;
@@ -18387,17 +18185,7 @@ function NonInviteClientTransaction(request_sender, request, transport) {
   this.request_sender = request_sender;
   this.request = request;
 
-  if (request_sender.ua.configuration.hack_via_tcp) {
-    via_transport = 'TCP';
-  }
-  else if (request_sender.ua.configuration.hack_via_ws) {
-    via_transport = 'WS';
-  }
-  else {
-    via_transport = transport.server.scheme;
-  }
-
-  via = 'SIP/2.0/' + via_transport;
+  via = 'SIP/2.0/' + transport.via_transport;
   via += ' ' + request_sender.ua.configuration.via_host + ';branch=' + this.id;
 
   this.request.setHeader('via', via);
@@ -18483,8 +18271,7 @@ NonInviteClientTransaction.prototype.receiveResponse = function(response) {
 
 function InviteClientTransaction(request_sender, request, transport) {
   var via,
-    tr = this,
-    via_transport;
+    tr = this;
 
   this.type = C.INVITE_CLIENT;
   this.transport = transport;
@@ -18492,17 +18279,7 @@ function InviteClientTransaction(request_sender, request, transport) {
   this.request_sender = request_sender;
   this.request = request;
 
-  if (request_sender.ua.configuration.hack_via_tcp) {
-    via_transport = 'TCP';
-  }
-  else if (request_sender.ua.configuration.hack_via_ws) {
-    via_transport = 'WS';
-  }
-  else {
-    via_transport = transport.server.scheme;
-  }
-
-  via = 'SIP/2.0/' + via_transport;
+  via = 'SIP/2.0/' + transport.via_transport;
   via += ' ' + request_sender.ua.configuration.via_host + ';branch=' + this.id;
 
   this.request.setHeader('via', via);
@@ -18676,25 +18453,14 @@ InviteClientTransaction.prototype.receiveResponse = function(response) {
 
 
 function AckClientTransaction(request_sender, request, transport) {
-  var via,
-    via_transport;
+  var via;
 
   this.transport = transport;
   this.id = 'z9hG4bK' + Math.floor(Math.random() * 10000000);
   this.request_sender = request_sender;
   this.request = request;
 
-  if (request_sender.ua.configuration.hack_via_tcp) {
-    via_transport = 'TCP';
-  }
-  else if (request_sender.ua.configuration.hack_via_ws) {
-    via_transport = 'WS';
-  }
-  else {
-    via_transport = transport.server.scheme;
-  }
-
-  via = 'SIP/2.0/' + via_transport;
+  via = 'SIP/2.0/' + transport.via_transport;
   via += ' ' + request_sender.ua.configuration.via_host + ';branch=' + this.id;
 
   this.request.setHeader('via', via);
@@ -19051,302 +18817,299 @@ function checkTransaction(ua, request) {
   }
 }
 
-},{"./Constants":1,"./Timers":19,"./VoxboneLogger.js":25,"debug":32,"events":27,"util":31}],21:[function(require,module,exports){
+},{"./Constants":1,"./Timers":20,"debug":33,"events":28,"util":32}],22:[function(require,module,exports){
 module.exports = Transport;
-
-
-var C = {
-  // Transport status codes
-  STATUS_READY:        0,
-  STATUS_DISCONNECTED: 1,
-  STATUS_ERROR:        2
-};
-
-
-/**
- * Expose C object.
- */
-Transport.C = C;
-
 
 /**
  * Dependencies.
  */
+var Socket = require('./Socket');
 var debug = require('debug')('JsSIP:Transport');
 var debugerror = require('debug')('JsSIP:ERROR:Transport');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
-debugerror.log = logger.logerror.bind(console);
-var JsSIP_C = require('./Constants');
-var Parser = require('./Parser');
-var UA = require('./UA');
-var SIPMessage = require('./SIPMessage');
-var sanityCheck = require('./sanityCheck');
-// 'websocket' module uses the native WebSocket interface when bundled to run in a browser.
-var W3CWebSocket = require('websocket').w3cwebsocket;
 
+/**
+ * Constants
+ */
+var C = {
+  // Transport status
+  STATUS_CONNECTED:           0,
+  STATUS_CONNECTING:          1,
+  STATUS_DISCONNECTED:        2,
 
-function Transport(ua, server) {
-  this.ua = ua;
-  this.ws = null;
-  this.server = server;
-  this.reconnection_attempts = 0;
-  this.closed = false;
-  this.connected = false;
-  this.reconnectTimer = null;
-  this.lastTransportError = {};
+  // Socket status
+  SOCKET_STATUS_READY:        0,
+  SOCKET_STATUS_ERROR:        1,
 
-  /**
-   * Options for the Node "websocket" library.
-   */
-
-  this.node_websocket_options = this.ua.configuration.node_websocket_options || {};
-
-  // Add our User-Agent header.
-  this.node_websocket_options.headers = this.node_websocket_options.headers || {};
-  this.node_websocket_options.headers['User-Agent'] = JsSIP_C.USER_AGENT;
-}
-
-Transport.prototype = {
-
-  /**
-  * Connect socket.
-  */
-  connect: function() {
-    var transport = this;
-
-    if(this.ws && (this.ws.readyState === this.ws.OPEN || this.ws.readyState === this.ws.CONNECTING)) {
-      debug('WebSocket ' + this.server.ws_uri + ' is already connected');
-      return false;
-    }
-
-    if(this.ws) {
-      this.ws.close();
-    }
-
-    debug('connecting to WebSocket ' + this.server.ws_uri);
-    this.ua.onTransportConnecting(this,
-      (this.reconnection_attempts === 0)?1:this.reconnection_attempts);
-
-    try {
-      // Hack in case W3CWebSocket is not the class exported by Node-WebSocket
-      // (may just happen if the above `var W3CWebSocket` line is overriden by
-      // `var W3CWebSocket = global.W3CWebSocket`).
-      if (W3CWebSocket.length > 3) {
-        this.ws = new W3CWebSocket(this.server.ws_uri, 'sip', this.node_websocket_options.origin, this.node_websocket_options.headers, this.node_websocket_options.requestOptions, this.node_websocket_options.clientConfig);
-      } else {
-        this.ws = new W3CWebSocket(this.server.ws_uri, 'sip');
-      }
-
-      this.ws.binaryType = 'arraybuffer';
-
-      this.ws.onopen = function() {
-        transport.onOpen();
-      };
-
-      this.ws.onclose = function(e) {
-        transport.onClose(e);
-      };
-
-      this.ws.onmessage = function(e) {
-        transport.onMessage(e);
-      };
-
-      this.ws.onerror = function(e) {
-        transport.onError(e);
-      };
-    } catch(e) {
-      debugerror('error connecting to WebSocket ' + this.server.ws_uri + ': ' + e);
-      this.lastTransportError.code = null;
-      this.lastTransportError.reason = e.message;
-      this.ua.onTransportError(this);
-    }
-  },
-
-  /**
-  * Disconnect socket.
-  */
-  disconnect: function() {
-    if(this.ws) {
-      // Clear reconnectTimer
-      clearTimeout(this.reconnectTimer);
-      // TODO: should make this.reconnectTimer = null here?
-
-      this.closed = true;
-      debug('closing WebSocket ' + this.server.ws_uri);
-      this.ws.close();
-    }
-
-    // TODO: Why this??
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-      this.ua.onTransportDisconnected({
-        transport: this,
-        code: this.lastTransportError.code,
-        reason: this.lastTransportError.reason
-      });
-    }
-  },
-
-  /**
-   * Send a message.
-   */
-  send: function(msg) {
-    var message = msg.toString();
-
-    if(this.ws && this.ws.readyState === this.ws.OPEN) {
-      debug('sending WebSocket message:\n%s\n', message);
-      this.ws.send(message);
-      return true;
-    } else {
-      debugerror('unable to send message, WebSocket is not open');
-      return false;
-    }
-  },
-
-  // Transport Event Handlers
-
-  onOpen: function() {
-    this.connected = true;
-
-    debug('WebSocket ' + this.server.ws_uri + ' connected');
-    // Clear reconnectTimer since we are not disconnected
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    // Reset reconnection_attempts
-    this.reconnection_attempts = 0;
-    // Disable closed
-    this.closed = false;
-    // Trigger onTransportConnected callback
-    this.ua.onTransportConnected(this);
-  },
-
-  onClose: function(e) {
-    var connected_before = this.connected;
-
-    this.connected = false;
-    this.lastTransportError.code = e.code;
-    this.lastTransportError.reason = e.reason;
-    debug('WebSocket disconnected (code: ' + e.code + (e.reason? '| reason: ' + e.reason : '') +')');
-
-    if(e.wasClean === false) {
-      debugerror('WebSocket abrupt disconnection');
-    }
-    // Transport was connected
-    if (connected_before === true) {
-      this.ua.onTransportClosed(this);
-
-      // Check whether the user requested to close.
-      if(!this.closed) {
-        this.reConnect();
-      }
-    } else {
-      // This is the first connection attempt
-      // May be a network error (or may be UA.stop() was called)
-      this.ua.onTransportError(this);
-    }
-  },
-
-  onMessage: function(e) {
-    var message, transaction,
-      data = e.data;
-
-    // CRLF Keep Alive response from server. Ignore it.
-    if(data === '\r\n') {
-      debug('received WebSocket message with CRLF Keep Alive response');
-      return;
-    }
-
-    // WebSocket binary message.
-    else if (typeof data !== 'string') {
-      try {
-        data = String.fromCharCode.apply(null, new Uint8Array(data));
-      } catch(evt) {
-        debugerror('received WebSocket binary message failed to be converted into string, message discarded');
-        return;
-      }
-
-      debug('received WebSocket binary message:\n%s\n', data);
-    }
-
-    // WebSocket text message.
-    else {
-      debug('received WebSocket text message:\n%s\n', data);
-    }
-
-    message = Parser.parseMessage(data, this.ua);
-
-    if (! message) {
-      return;
-    }
-
-    if(this.ua.status === UA.C.STATUS_USER_CLOSED && message instanceof SIPMessage.IncomingRequest) {
-      return;
-    }
-
-    // Do some sanity check
-    if(! sanityCheck(message, this.ua, this)) {
-      return;
-    }
-
-    if(message instanceof SIPMessage.IncomingRequest) {
-      message.transport = this;
-      this.ua.receiveRequest(message);
-    } else if(message instanceof SIPMessage.IncomingResponse) {
-      /* Unike stated in 18.1.2, if a response does not match
-      * any transaction, it is discarded here and no passed to the core
-      * in order to be discarded there.
-      */
-      switch(message.method) {
-        case JsSIP_C.INVITE:
-          transaction = this.ua.transactions.ict[message.via_branch];
-          if(transaction) {
-            transaction.receiveResponse(message);
-          }
-          break;
-        case JsSIP_C.ACK:
-          // Just in case ;-)
-          break;
-        default:
-          transaction = this.ua.transactions.nict[message.via_branch];
-          if(transaction) {
-            transaction.receiveResponse(message);
-          }
-          break;
-      }
-    }
-  },
-
-  onError: function(e) {
-    debugerror('WebSocket connection error: %o', e);
-  },
-
-  /**
-  * Reconnection attempt logic.
-  */
-  reConnect: function() {
-    var transport = this;
-
-    this.reconnection_attempts += 1;
-
-    if(this.reconnection_attempts > this.ua.configuration.ws_server_max_reconnection) {
-      debugerror('maximum reconnection attempts for WebSocket ' + this.server.ws_uri);
-      this.ua.onTransportError(this);
-    } else {
-      debug('trying to reconnect to WebSocket ' + this.server.ws_uri + ' (reconnection attempt ' + this.reconnection_attempts + ')');
-
-      this.reconnectTimer = setTimeout(function() {
-        transport.connect();
-        transport.reconnectTimer = null;
-      }, this.ua.configuration.ws_server_reconnection_timeout * 1000);
-    }
+  // Recovery options
+  recovery_options: {
+    min_interval: 2, // minimum interval in seconds between recover attempts
+    max_interval: 30 // maximum interval in seconds between recover attempts
   }
 };
 
-},{"./Constants":1,"./Parser":10,"./SIPMessage":18,"./UA":22,"./VoxboneLogger.js":25,"./sanityCheck":26,"debug":32,"websocket":46}],22:[function(require,module,exports){
+/*
+ * Manages one or multiple JsSIP.Socket instances.
+ * Is reponsible for transport recovery logic among all socket instances.
+ *
+ * @socket JsSIP::Socket instance
+ */
+
+function Transport(sockets, recovery_options) {
+  debug('new()');
+
+  this.status = C.STATUS_DISCONNECTED;
+
+  // current socket
+  this.socket = null;
+
+  // socket collection
+  this.sockets = [];
+
+  this.recovery_options = recovery_options || C.recovery_options;
+  this.recover_attempts = 0;
+  this.recovery_timer = null;
+
+  this.close_requested = false;
+
+  if (typeof sockets === 'undefined') {
+    throw new TypeError('Invalid argument.' +
+                        ' undefined \'sockets\' argument');
+  }
+
+  if (!(sockets instanceof Array)) {
+    sockets = [ sockets ];
+  }
+
+  sockets.forEach(function(socket) {
+    if (!Socket.isSocket(socket.socket)) {
+      throw new TypeError('Invalid argument.' +
+                          ' invalid \'JsSIP.Socket\' instance');
+    }
+
+    if (socket.weight && !Number(socket.weight)) {
+      throw new TypeError('Invalid argument.' +
+                          ' \'weight\' attribute is not a number');
+    }
+
+    this.sockets.push({
+      socket: socket.socket,
+      weight: socket.weight || 0,
+      status: C.SOCKET_STATUS_READY
+    });
+  }, this);
+
+  // read only properties
+  Object.defineProperties(this, {
+    via_transport:   { get: function() { return this.socket.via_transport; } },
+    url:      { get: function() { return this.socket.url;       } },
+    sip_uri:  { get: function() { return this.socket.sip_uri;   } }
+  });
+
+  // get the socket with higher weight
+  getSocket.call(this);
+}
+
+/**
+ * Instance Methods
+ */
+
+Transport.prototype.connect = function() {
+  debug('connect()');
+
+  if (this.isConnected()) {
+    debug('Transport is already connected');
+    return;
+  } else if (this.isConnecting()) {
+    debug('Transport is connecting');
+    return;
+  }
+
+  this.close_requested = false;
+  this.status = C.STATUS_CONNECTING;
+  this.onconnecting({ socket:this.socket, attempts:this.recover_attempts });
+
+  if (!this.close_requested) {
+    // bind socket event callbacks
+    this.socket.onconnect     = onConnect.bind(this);
+    this.socket.ondisconnect  = onDisconnect.bind(this);
+    this.socket.ondata        = onData.bind(this);
+
+    this.socket.connect();
+  }
+
+  return;
+};
+
+Transport.prototype.disconnect = function() {
+  debug('close()');
+
+  this.close_requested = true;
+  this.recover_attempts = 0;
+  this.status = C.STATUS_DISCONNECTED;
+
+  // clear recovery_timer
+  if (this.recovery_timer !== null) {
+    clearTimeout(this.recovery_timer);
+    this.recovery_timer = null;
+  }
+
+  // unbind socket event callbacks
+  this.socket.onconnect     = function() {};
+  this.socket.ondisconnect  = function() {};
+  this.socket.ondata        = function() {};
+
+  this.socket.disconnect();
+  this.ondisconnect();
+};
+
+Transport.prototype.send = function(data) {
+  debug('send()');
+
+  if (!this.isConnected()) {
+    debugerror('unable to send message, transport is not connected');
+    return false;
+  }
+
+  var message = data.toString();
+
+  debug('sending message:\n\n' + message + '\n');
+  return this.socket.send(message);
+};
+
+Transport.prototype.isConnected = function() {
+  return this.status === C.STATUS_CONNECTED;
+};
+
+Transport.prototype.isConnecting = function() {
+  return this.status === C.STATUS_CONNECTING;
+};
+
+/**
+ * Socket Event Handlers
+ */
+
+function onConnect() {
+  this.recover_attempts = 0;
+  this.status = C.STATUS_CONNECTED;
+
+  // clear recovery_timer
+  if (this.recovery_timer !== null) {
+    clearTimeout(this.recovery_timer);
+    this.recovery_timer = null;
+  }
+
+  this.onconnect( {socket:this} );
+}
+
+function onDisconnect(error, code, reason) {
+  this.status = C.STATUS_DISCONNECTED;
+  this.ondisconnect({ socket:this.socket, error:error, code:code, reason:reason });
+
+  if (this.close_requested) {
+    return;
+  }
+
+  // update socket status
+  if (error) {
+    this.socket.status = C.SOCKET_STATUS_ERROR;
+  }
+
+  reconnect.call(this, error);
+}
+
+function onData(data) {
+  // CRLF Keep Alive response from server. Ignore it.
+  if(data === '\r\n') {
+    debug('received message with CRLF Keep Alive response');
+    return;
+  }
+
+  // binary message.
+  else if (typeof data !== 'string') {
+    try {
+      data = String.fromCharCode.apply(null, new Uint8Array(data));
+    } catch(evt) {
+      debug('received binary message failed to be converted into string,' +
+            ' message discarded');
+      return;
+    }
+
+    debug('received binary message:\n\n' + data + '\n');
+  }
+
+  // text message.
+  else {
+    debug('received text message:\n\n' + data + '\n');
+  }
+
+  this.ondata({ transport:this, message:data });
+}
+
+function reconnect() {
+  var k,
+  self = this;
+
+  this.recover_attempts+=1;
+
+  k = Math.floor((Math.random() * Math.pow(2,this.recover_attempts)) +1);
+
+  if (k < this.recovery_options.min_interval) {
+    k = this.recovery_options.min_interval;
+  }
+
+  else if (k > this.recovery_options.max_interval) {
+    k = this.recovery_options.max_interval;
+  }
+
+  debug('reconnection attempt: '+ this.recover_attempts +
+        '. next connection attempt in '+ k +' seconds');
+
+  this.recovery_timer = setTimeout(function() {
+    if (!self.close_requested && !(self.isConnected() || self.isConnecting())) {
+      // get the next available socket with higher weight
+      getSocket.call(self);
+
+      // connect the socket
+      self.connect();
+    }
+  }, k * 1000);
+}
+
+/**
+ * get the next available socket with higher weight
+ */
+function getSocket() {
+
+  var candidates = [];
+
+  this.sockets.forEach(function(socket) {
+    if (socket.status === C.SOCKET_STATUS_ERROR) {
+      return; // continue the array iteration
+    } else if (candidates.length === 0) {
+      candidates.push(socket);
+    } else if (socket.weight > candidates[0].weight) {
+      candidates = [socket];
+    } else if (socket.weight === candidates[0].weight) {
+      candidates.push(socket);
+    }
+  });
+
+  if (candidates.length === 0) {
+    // all sockets have failed. reset sockets status
+    this.sockets.forEach(function(socket) {
+      socket.status = C.SOCKET_STATUS_READY;
+    });
+
+    // get next available socket
+    getSocket.call(this);
+    return;
+  }
+
+  var idx = Math.floor((Math.random()* candidates.length));
+  this.socket = candidates[idx].socket;
+}
+
+},{"./Socket":19,"debug":33}],23:[function(require,module,exports){
 module.exports = UA;
 
 
@@ -19374,22 +19137,24 @@ UA.C = C;
 var util = require('util');
 var events = require('events');
 var debug = require('debug')('JsSIP:UA');
-var logger = require('./VoxboneLogger.js');
 var debugerror = require('debug')('JsSIP:ERROR:UA');
-debug.log = logger.loginfo.bind(console);
-debugerror.log = logger.logerror.bind(console);
+debugerror.log = console.warn.bind(console);
 var rtcninja = require('rtcninja');
 var JsSIP_C = require('./Constants');
 var Registrator = require('./Registrator');
 var RTCSession = require('./RTCSession');
 var Message = require('./Message');
+var Transactions = require('./Transactions');
 var Transport = require('./Transport');
-var Transactions = require('./Transactions');
-var Transactions = require('./Transactions');
+var WebSocketInterface = require('./WebSocketInterface');
+var Socket = require('./Socket');
 var Utils = require('./Utils');
 var Exceptions = require('./Exceptions');
 var URI = require('./URI');
 var Grammar = require('./Grammar');
+var Parser = require('./Parser');
+var SIPMessage = require('./SIPMessage');
+var sanityCheck = require('./sanityCheck');
 
 
 
@@ -19401,6 +19166,8 @@ var Grammar = require('./Grammar');
  * @throws {TypeError} If no configuration is given.
  */
 function UA(configuration) {
+  debug('new() [configuration:%o]', configuration);
+
   this.cache = {
     credentials: {}
   };
@@ -19426,9 +19193,6 @@ function UA(configuration) {
 
   // Custom UA empty object for high level use
   this.data = {};
-
-  this.transportRecoverAttempts = 0;
-  this.transportRecoveryTimer = null;
 
   Object.defineProperties(this, {
     transactionsCount: {
@@ -19505,14 +19269,13 @@ util.inherits(UA, events.EventEmitter);
 //=================
 
 /**
- * Connect to the WS server if status = STATUS_INIT.
+ * Connect to the server if status = STATUS_INIT.
  * Resume UA after being closed.
  */
 UA.prototype.start = function() {
   debug('start()');
 
-  var server,
-      self = this;
+  var self = this;
 
   function connect() {
     debug('restarting UA');
@@ -19521,8 +19284,6 @@ UA.prototype.start = function() {
   }
 
   if (this.status === C.STATUS_INIT) {
-    server = this.getNextWsServer();
-    this.transport = new Transport(this, server);
     this.transport.connect();
   } else if(this.status === C.STATUS_USER_CLOSED) {
     if (!this.isConnected()) {
@@ -19582,11 +19343,7 @@ UA.prototype.isRegistered = function() {
  * Connection state.
  */
 UA.prototype.isConnected = function() {
-  if(this.transport) {
-    return this.transport.connected;
-  } else {
-    return false;
-  }
+  return this.transport.isConnected();
 };
 
 /**
@@ -19662,9 +19419,6 @@ UA.prototype.stop = function() {
     return;
   }
 
-  // Clear transportRecoveryTimer
-  clearTimeout(this.transportRecoveryTimer);
-
   // Close registrator
   this._registrator.close();
 
@@ -19684,18 +19438,18 @@ UA.prototype.stop = function() {
 
   this.status = C.STATUS_USER_CLOSED;
 
-  // If there are no pending non-INVITE client or server transactions and no
-  // sessions, then disconnect now. Otherwise wait for 2 seconds.
-  // TODO: This fails if sotp() is called once an outgoing is cancelled (no time
-  // to send ACK for 487), so leave 2 seconds until properly re-designed.
-  // if (this.nistTransactionsCount === 0 && this.nictTransactionsCount === 0 && num_sessions === 0) {
-    // ua.transport.disconnect();
-  // }
-  // else {
+  if (this.nistTransactionsCount  === 0 &&
+      this.nictTransactionsCount  === 0 &&
+      this.ictTransactionsCount   === 0 &&
+      this.istTransactionsCount   === 0 &&
+      num_sessions === 0) {
+    ua.transport.disconnect();
+  }
+  else {
     setTimeout(function() {
       ua.transport.disconnect();
     }, 2000);
-  // }
+  }
 };
 
 /**
@@ -19708,14 +19462,55 @@ UA.prototype.normalizeTarget = function(target) {
 };
 
 /**
+ * Allow retrieving configuration and autogenerated fields in runtime.
+ */
+UA.prototype.get = function(parameter) {
+  switch(parameter) {
+    case 'realm':
+      return this.configuration.realm;
+
+    case 'ha1':
+      return this.configuration.ha1;
+
+    default:
+      debugerror('get() | cannot get "%s" parameter in runtime', parameter);
+      return undefined;
+  }
+
+  return true;
+};
+
+/**
  * Allow configuration changes in runtime.
  * Returns true if the parameter could be set.
  */
 UA.prototype.set = function(parameter, value) {
   switch(parameter) {
-    case 'password':
+    case 'password': {
       this.configuration.password = String(value);
       break;
+    }
+
+    case 'realm': {
+      this.configuration.realm = String(value);
+      break;
+    }
+
+    case 'ha1': {
+      this.configuration.ha1 = String(value);
+      // Delete the plain SIP password.
+      this.configuration.password = null;
+      break;
+    }
+
+    case 'display_name': {
+      if (Grammar.parse('"' + value + '"', 'display_name') === -1) {
+        debugerror('set() | wrong "display_name"');
+        return false;
+      }
+      this.configuration.display_name = value;
+      break;
+    }
 
     default:
       debugerror('set() | cannot set "%s" parameter in runtime', parameter);
@@ -19752,116 +19547,6 @@ UA.prototype.set = function(parameter, value) {
 //==========================
 // Event Handlers
 //==========================
-
-/**
- * Transport Close event.
- */
-UA.prototype.onTransportClosed = function(transport) {
-  // Run _onTransportError_ callback on every client transaction using _transport_
-  var type, idx, length,
-  client_transactions = ['nict', 'ict', 'nist', 'ist'];
-
-  transport.server.status = Transport.C.STATUS_DISCONNECTED;
-
-  length = client_transactions.length;
-  for (type = 0; type < length; type++) {
-    for(idx in this.transactions[client_transactions[type]]) {
-      this.transactions[client_transactions[type]][idx].onTransportError();
-    }
-  }
-
-  this.emit('disconnected', {
-    transport: transport,
-    code: transport.lastTransportError.code,
-    reason: transport.lastTransportError.reason
-  });
-};
-
-/**
- * Unrecoverable transport event.
- * Connection reattempt logic has been done and didn't success.
- */
-UA.prototype.onTransportError = function(transport) {
-  var server;
-
-  debug('transport ' + transport.server.ws_uri + ' failed | connection state set to '+ Transport.C.STATUS_ERROR);
-
-  // Close sessions.
-  // Mark this transport as 'down' and try the next one
-  transport.server.status = Transport.C.STATUS_ERROR;
-
-  this.emit('disconnected', {
-    transport: transport,
-    code: transport.lastTransportError.code,
-    reason: transport.lastTransportError.reason
-  });
-
-  // Don't attempt to recover the connection if the user closes the UA.
-  if (this.status === C.STATUS_USER_CLOSED) {
-    return;
-  }
-
-  server = this.getNextWsServer();
-
-  if(server) {
-    this.transport = new Transport(this, server);
-    this.transport.connect();
-  } else {
-    this.closeSessionsOnTransportError();
-    if (!this.error || this.error !== C.NETWORK_ERROR) {
-      this.status = C.STATUS_NOT_READY;
-      this.error = C.NETWORK_ERROR;
-    }
-    // Transport Recovery process
-    this.recoverTransport();
-  }
-};
-
-/**
- * Transport connection event.
- */
-UA.prototype.onTransportConnected = function(transport) {
-  this.transport = transport;
-
-  // Reset transport recovery counter
-  this.transportRecoverAttempts = 0;
-
-  transport.server.status = Transport.C.STATUS_READY;
-
-  if(this.status === C.STATUS_USER_CLOSED) {
-    return;
-  }
-
-  this.status = C.STATUS_READY;
-  this.error = null;
-
-  if(this.dynConfiguration.register) {
-    this._registrator.register();
-  }
-
-  this.emit('connected', {
-    transport: transport
-  });
-};
-
-
-/**
- * Transport connecting event
- */
-UA.prototype.onTransportConnecting = function(transport, attempts) {
-  this.emit('connecting', {
-    transport: transport,
-    attempts: attempts
-  });
-};
-
-/**
- * Transport connected event
- */
-UA.prototype.onTransportDisconnected = function(data) {
-  this.emit('disconnected', data);
-};
-
 
 /**
  * new Transaction
@@ -20105,78 +19790,6 @@ UA.prototype.findDialog = function(call_id, from_tag, to_tag) {
   }
 };
 
-/**
- * Retrieve the next server to which connect.
- */
-UA.prototype.getNextWsServer = function() {
-  // Order servers by weight
-  var idx, length, ws_server,
-  candidates = [];
-
-  length = this.configuration.ws_servers.length;
-  for (idx = 0; idx < length; idx++) {
-    ws_server = this.configuration.ws_servers[idx];
-
-    if (ws_server.status === Transport.C.STATUS_ERROR) {
-      continue;
-    } else if (candidates.length === 0) {
-      candidates.push(ws_server);
-    } else if (ws_server.weight > candidates[0].weight) {
-      candidates = [ws_server];
-    } else if (ws_server.weight === candidates[0].weight) {
-      candidates.push(ws_server);
-    }
-  }
-
-  idx = Math.floor((Math.random()* candidates.length));
-  return candidates[idx];
-};
-
-/**
- * Close all sessions on transport error.
- */
-UA.prototype.closeSessionsOnTransportError = function() {
-  var idx;
-
-  // Run _transportError_ for every Session
-  for(idx in this.sessions) {
-    this.sessions[idx].onTransportError();
-  }
-  // Call registrator _onTransportClosed_
-  this._registrator.onTransportClosed();
-};
-
-UA.prototype.recoverTransport = function(ua) {
-  var idx, length, k, nextRetry, count, server;
-
-  ua = ua || this;
-  count = ua.transportRecoverAttempts;
-
-  length = ua.configuration.ws_servers.length;
-  for (idx = 0; idx < length; idx++) {
-    ua.configuration.ws_servers[idx].status = 0;
-  }
-
-  server = ua.getNextWsServer();
-
-  k = Math.floor((Math.random() * Math.pow(2,count)) +1);
-  nextRetry = k * ua.configuration.connection_recovery_min_interval;
-
-  if (nextRetry > ua.configuration.connection_recovery_max_interval) {
-    debug('time for next connection attempt exceeds connection_recovery_max_interval, resetting counter');
-    nextRetry = ua.configuration.connection_recovery_min_interval;
-    count = 0;
-  }
-
-  debug('next connection attempt in '+ nextRetry +' seconds');
-
-  this.transportRecoveryTimer = setTimeout(function() {
-    ua.transportRecoverAttempts = count + 1;
-    ua.transport = new Transport(ua, server);
-    ua.transport.connect();
-  }, nextRetry * 1000);
-};
-
 UA.prototype.loadConfig = function(configuration) {
   // Settings and default values
   var parameter, value, checked_value, hostport_params, registrar_server,
@@ -20186,34 +19799,28 @@ UA.prototype.loadConfig = function(configuration) {
     */
     via_host: Utils.createRandomToken(12) + '.invalid',
 
-    // Password
+    // SIP Contact URI
+    contact_uri: null,
+
+    // SIP authentication password
     password: null,
+
+    // SIP authentication realm
+    realm: null,
+
+    // SIP authentication HA1 hash
+    ha1: null,
 
     // Registration parameters
     register_expires: 600,
     register: true,
     registrar_server: null,
 
-    // Transport related parameters
-    ws_server_max_reconnection: 3,
-    ws_server_reconnection_timeout: 4,
-
-    connection_recovery_min_interval: 2,
-    connection_recovery_max_interval: 30,
-
     use_preloaded_route: false,
 
     // Session parameters
     no_answer_timeout: 60,
     session_timers: true,
-
-    // Hacks
-    hack_via_tcp: false,
-    hack_via_ws: false,
-    hack_ip_in_contact: false,
-
-    // Options for Node.
-    node_websocket_options: {}
   };
 
   // Pre-Configuration
@@ -20245,20 +19852,13 @@ UA.prototype.loadConfig = function(configuration) {
         continue;
       }
 
-      checked_value = UA.configuration_check.optional[parameter].call(this, value);
+      checked_value = UA.configuration_check.optional[parameter].call(this, value, configuration);
       if (checked_value !== undefined) {
         settings[parameter] = checked_value;
       } else {
         throw new Exceptions.ConfigurationError(parameter, value);
       }
     }
-  }
-
-  // Sanity Checks
-
-  // Connection recovery intervals.
-  if(settings.connection_recovery_max_interval < settings.connection_recovery_min_interval) {
-    throw new Exceptions.ConfigurationError('connection_recovery_max_interval', settings.connection_recovery_max_interval);
   }
 
   // Post Configuration Process
@@ -20281,6 +19881,42 @@ UA.prototype.loadConfig = function(configuration) {
   hostport_params.user = null;
   settings.hostport_params = hostport_params.toString().replace(/^sip:/i, '');
 
+  // Transport
+  var sockets = [];
+  if (settings.ws_servers && Array.isArray(settings.ws_servers)) {
+    sockets = sockets.concat(settings.ws_servers);
+  }
+
+  if (settings.sockets && Array.isArray(settings.sockets)) {
+    sockets = sockets.concat(settings.sockets);
+  }
+
+  if (sockets.length === 0) {
+    throw new Exceptions.ConfigurationError('sockets');
+  }
+
+  try {
+    this.transport = new Transport(sockets, { /* recovery options */
+      max_interval: settings.connection_recovery_max_interval,
+      min_interval: settings.connection_recovery_min_interval
+    });
+
+    // Transport event callbacks
+    this.transport.onconnecting = onTransportConnecting.bind(this);
+    this.transport.onconnect    = onTransportConnect.bind(this);
+    this.transport.ondisconnect = onTransportDisconnect.bind(this);
+    this.transport.ondata       = onTransportData.bind(this);
+
+    // transport options not needed here anymore
+    delete settings.connection_recovery_max_interval;
+    delete settings.connection_recovery_min_interval;
+    delete settings.ws_servers;
+    delete settings.sockets;
+  } catch (e) {
+    debugerror(e);
+    throw new Exceptions.ConfigurationError('sockets', sockets);
+  }
+
   // Check whether authorization_user is explicitly defined.
   // Take 'settings.uri.user' value if not.
   if (!settings.authorization_user) {
@@ -20301,14 +19937,19 @@ UA.prototype.loadConfig = function(configuration) {
   settings.no_answer_timeout = settings.no_answer_timeout * 1000;
 
   // Via Host
-  if (settings.hack_ip_in_contact) {
-    settings.via_host = Utils.getRandomTestNetIP();
+  if (settings.contact_uri) {
+    settings.via_host = settings.contact_uri.host;
+  }
+
+  // Contact URI
+  else {
+    settings.contact_uri = new URI('sip', Utils.createRandomToken(8), settings.via_host, null, {transport: 'ws'});
   }
 
   this.contact = {
     pub_gruu: null,
     temp_gruu: null,
-    uri: new URI('sip', Utils.createRandomToken(8), settings.via_host, null, {transport: 'ws'}),
+    uri: settings.contact_uri,
     toString: function(options) {
       options = options || {};
 
@@ -20353,6 +19994,7 @@ UA.prototype.loadConfig = function(configuration) {
         debug('- ' + parameter + ': ' + settings[parameter]);
         break;
       case 'password':
+      case 'ha1':
         debug('- ' + parameter + ': ' + 'NOT SHOWN');
         break;
       default:
@@ -20373,40 +20015,41 @@ UA.configuration_skeleton = (function() {
     parameters = [
       // Internal parameters
       'jssip_id',
-      'ws_server_max_reconnection',
-      'ws_server_reconnection_timeout',
       'hostport_params',
 
       // Mandatory user configurable parameters
       'uri',
-      'ws_servers',
 
       // Optional user configurable parameters
       'authorization_user',
-      'connection_recovery_max_interval',
-      'connection_recovery_min_interval',
+      'contact_uri',
       'display_name',
-      'hack_via_tcp', // false
-      'hack_via_ws', // false
-      'hack_ip_in_contact', //false
       'instance_id',
       'no_answer_timeout', // 30 seconds
       'session_timers', // true
-      'node_websocket_options',
       'password',
+      'realm',
+      'ha1',
       'register_expires', // 600 seconds
       'registrar_server',
+      'sockets',
       'use_preloaded_route',
+      'ws_servers',
+
 
       // Post-configuration generated parameters
       'via_core_value',
       'via_host'
     ];
 
+  var writable_parameters = [
+    'password', 'realm', 'ha1', 'display_name'
+  ];
+
   for(idx in parameters) {
     parameter = parameters[idx];
 
-    if (['password'].indexOf(parameter) !== -1) {
+    if (writable_parameters.indexOf(parameter) !== -1) {
       writable = true;
     } else {
       writable = false;
@@ -20449,65 +20092,6 @@ UA.configuration_check = {
       } else {
         return parsed;
       }
-    },
-
-    ws_servers: function(ws_servers) {
-      var idx, length, url;
-
-      /* Allow defining ws_servers parameter as:
-       *  String: "host"
-       *  Array of Strings: ["host1", "host2"]
-       *  Array of Objects: [{ws_uri:"host1", weight:1}, {ws_uri:"host2", weight:0}]
-       *  Array of Objects and Strings: [{ws_uri:"host1"}, "host2"]
-       */
-      if (typeof ws_servers === 'string') {
-        ws_servers = [{ws_uri: ws_servers}];
-      } else if (Array.isArray(ws_servers)) {
-        length = ws_servers.length;
-        for (idx = 0; idx < length; idx++) {
-          if (typeof ws_servers[idx] === 'string') {
-            ws_servers[idx] = {ws_uri: ws_servers[idx]};
-          }
-        }
-      } else {
-        return;
-      }
-
-      if (ws_servers.length === 0) {
-        return false;
-      }
-
-      length = ws_servers.length;
-      for (idx = 0; idx < length; idx++) {
-        if (!ws_servers[idx].ws_uri) {
-          debug('ERROR: missing "ws_uri" attribute in ws_servers parameter');
-          return;
-        }
-        if (ws_servers[idx].weight && !Number(ws_servers[idx].weight)) {
-          debug('ERROR: "weight" attribute in ws_servers parameter must be a Number');
-          return;
-        }
-
-        url = Grammar.parse(ws_servers[idx].ws_uri, 'absoluteURI');
-
-        if(url === -1) {
-          debug('ERROR: invalid "ws_uri" attribute in ws_servers parameter: ' + ws_servers[idx].ws_uri);
-          return;
-        } else if(url.scheme !== 'wss' && url.scheme !== 'ws') {
-          debug('ERROR: invalid URI scheme in ws_servers parameter: ' + url.scheme);
-          return;
-        } else {
-          ws_servers[idx].sip_uri = '<sip:' + url.host + (url.port ? ':' + url.port : '') + ';transport=ws;lr>';
-
-          if (!ws_servers[idx].weight) {
-            ws_servers[idx].weight = 0;
-          }
-
-          ws_servers[idx].status = 0;
-          ws_servers[idx].scheme = url.scheme.toUpperCase();
-        }
-      }
-      return ws_servers;
     }
   },
 
@@ -20541,29 +20125,20 @@ UA.configuration_check = {
       }
     },
 
+    contact_uri: function(contact_uri) {
+      if (typeof contact_uri === 'string') {
+        var uri = Grammar.parse(contact_uri,'SIP_URI');
+        if (uri !== -1) {
+          return uri;
+        }
+      }
+    },
+
     display_name: function(display_name) {
-      if(Grammar.parse('"' + display_name + '"', 'display_name') === -1) {
+      if (Grammar.parse('"' + display_name + '"', 'display_name') === -1) {
         return;
       } else {
         return display_name;
-      }
-    },
-
-    hack_via_tcp: function(hack_via_tcp) {
-      if (typeof hack_via_tcp === 'boolean') {
-        return hack_via_tcp;
-      }
-    },
-
-    hack_via_ws: function(hack_via_ws) {
-      if (typeof hack_via_ws === 'boolean') {
-        return hack_via_ws;
-      }
-    },
-
-    hack_ip_in_contact: function(hack_ip_in_contact) {
-      if (typeof hack_ip_in_contact === 'boolean') {
-        return hack_ip_in_contact;
       }
     },
 
@@ -20595,12 +20170,16 @@ UA.configuration_check = {
       }
     },
 
-    node_websocket_options: function(node_websocket_options) {
-      return (typeof node_websocket_options === 'object') ? node_websocket_options : {};
-    },
-
     password: function(password) {
       return String(password);
+    },
+
+    realm: function(realm) {
+      return String(realm);
+    },
+
+    ha1: function(ha1) {
+      return String(ha1);
     },
 
     register: function(register) {
@@ -20636,15 +20215,177 @@ UA.configuration_check = {
       }
     },
 
+    sockets: function(sockets) {
+      var idx, length;
+
+      /* Allow defining sockets parameter as:
+       *  Socket: socket
+       *  Array of Socket: [socket1, socket2]
+       *  Array of Objects: [{socket: socket1, weight:1}, {socket: Socket2, weight:0}]
+       *  Array of Objects and Socket: [{socket: socket1}, socket2]
+       */
+      if (Socket.isSocket(sockets)) {
+        sockets = [{socket: sockets}];
+      } else if (Array.isArray(sockets) && sockets.length) {
+        length = sockets.length;
+        for (idx = 0; idx < length; idx++) {
+          if (Socket.isSocket(sockets[idx])) {
+            sockets[idx] = {socket: sockets[idx]};
+          }
+        }
+      } else {
+        return;
+      }
+
+      return sockets;
+    },
+
     use_preloaded_route: function(use_preloaded_route) {
       if (typeof use_preloaded_route === 'boolean') {
         return use_preloaded_route;
       }
+    },
+
+    ws_servers: function(ws_servers) {
+      var idx, length, sockets = [];
+
+      /* Allow defining ws_servers parameter as:
+       *  String: "host"
+       *  Array of Strings: ["host1", "host2"]
+       *  Array of Objects: [{ws_uri:"host1", weight:1}, {ws_uri:"host2", weight:0}]
+       *  Array of Objects and Strings: [{ws_uri:"host1"}, "host2"]
+       */
+      if (typeof ws_servers === 'string') {
+        ws_servers = [{ws_uri: ws_servers}];
+      } else if (Array.isArray(ws_servers) && ws_servers.length) {
+        length = ws_servers.length;
+        for (idx = 0; idx < length; idx++) {
+          if (typeof ws_servers[idx] === 'string') {
+            ws_servers[idx] = {ws_uri: ws_servers[idx]};
+          }
+        }
+      } else {
+        return;
+      }
+
+      length = ws_servers.length;
+      for (idx = 0; idx < length; idx++) {
+        try {
+          sockets.push({
+            socket: new WebSocketInterface(ws_servers[idx].ws_uri),
+            weight: ws_servers[idx].weight || 0
+          });
+        } catch(e) {
+          debugerror(e);
+          return;
+        }
+      }
+
+      return sockets;
     }
   }
 };
 
-},{"./Constants":1,"./Exceptions":5,"./Grammar":6,"./Message":8,"./RTCSession":11,"./Registrator":16,"./Transactions":20,"./Transport":21,"./URI":23,"./Utils":24,"./VoxboneLogger.js":25,"debug":32,"events":27,"rtcninja":37,"util":31}],23:[function(require,module,exports){
+/**
+ * Transport event handlers
+ */
+
+// Transport connecting event
+function onTransportConnecting(data) {
+  this.emit('connecting', data);
+}
+
+// Transport connected event.
+function onTransportConnect(data) {
+  if(this.status === C.STATUS_USER_CLOSED) {
+    return;
+  }
+
+  this.status = C.STATUS_READY;
+  this.error = null;
+
+  this.emit('connected', data);
+
+  if(this.dynConfiguration.register) {
+    this._registrator.register();
+  }
+}
+
+// Transport disconnected event.
+function onTransportDisconnect(data) {
+  // Run _onTransportError_ callback on every client transaction using _transport_
+  var type, idx, length,
+  client_transactions = ['nict', 'ict', 'nist', 'ist'];
+
+  length = client_transactions.length;
+  for (type = 0; type < length; type++) {
+    for(idx in this.transactions[client_transactions[type]]) {
+      this.transactions[client_transactions[type]][idx].onTransportError();
+    }
+  }
+
+  this.emit('disconnected', data);
+
+  // Call registrator _onTransportClosed_
+  this._registrator.onTransportClosed();
+
+  if (this.status !== C.STATUS_USER_CLOSED) {
+    this.status = C.STATUS_NOT_READY;
+    this.error = C.NETWORK_ERROR;
+  }
+}
+
+// Transport data event
+function onTransportData(data) {
+ var transaction,
+  transport = data.transport,
+  message = data.message;
+
+ message = Parser.parseMessage(message, this);
+
+ if (! message) {
+   return;
+ }
+
+ if (this.status === UA.C.STATUS_USER_CLOSED &&
+     message instanceof SIPMessage.IncomingRequest) {
+   return;
+ }
+
+ // Do some sanity check
+ if(! sanityCheck(message, this, transport)) {
+   return;
+ }
+
+ if(message instanceof SIPMessage.IncomingRequest) {
+   message.transport = transport;
+   this.receiveRequest(message);
+ } else if(message instanceof SIPMessage.IncomingResponse) {
+   /* Unike stated in 18.1.2, if a response does not match
+   * any transaction, it is discarded here and no passed to the core
+   * in order to be discarded there.
+   */
+   switch(message.method) {
+     case JsSIP_C.INVITE:
+       transaction = this.transactions.ict[message.via_branch];
+       if(transaction) {
+         transaction.receiveResponse(message);
+       }
+       break;
+     case JsSIP_C.ACK:
+       // Just in case ;-)
+       break;
+     default:
+       transaction = this.transactions.nict[message.via_branch];
+       if(transaction) {
+         transaction.receiveResponse(message);
+       }
+       break;
+   }
+ }
+}
+
+},{"./Constants":1,"./Exceptions":5,"./Grammar":6,"./Message":8,"./Parser":10,"./RTCSession":11,"./Registrator":16,"./SIPMessage":18,"./Socket":19,"./Transactions":21,"./Transport":22,"./URI":24,"./Utils":25,"./WebSocketInterface":26,"./sanityCheck":27,"debug":33,"events":28,"rtcninja":43,"util":32}],24:[function(require,module,exports){
 module.exports = URI;
 
 
@@ -20721,7 +20462,7 @@ function URI(scheme, user, host, port, parameters, headers) {
 URI.prototype = {
   setParam: function(key, value) {
     if(key) {
-      this.parameters[key.toLowerCase()] = (typeof value === 'undefined' || value === null) ? null : value.toString().toLowerCase();
+      this.parameters[key.toLowerCase()] = (typeof value === 'undefined' || value === null) ? null : value.toString();
     }
   },
 
@@ -20856,7 +20597,7 @@ URI.parse = function(uri) {
   }
 };
 
-},{"./Constants":1,"./Grammar":6,"./Utils":24}],24:[function(require,module,exports){
+},{"./Constants":1,"./Grammar":6,"./Utils":25}],25:[function(require,module,exports){
 var Utils = {};
 
 module.exports = Utils;
@@ -20882,6 +20623,14 @@ Utils.isFunction = function(fn) {
   }
 };
 
+Utils.isString = function(str) {
+  if (str !== undefined) {
+    return (Object.prototype.toString.call(str) === '[object String]')? true : false;
+  } else {
+    return false;
+  }
+};
+
 Utils.isDecimal = function(num) {
   return !isNaN(num) && (parseFloat(num) === parseInt(num,10));
 };
@@ -20890,6 +20639,16 @@ Utils.isEmpty = function(value) {
   if (value === null || value === '' || value === undefined || (Array.isArray(value) && value.length === 0) || (typeof(value) === 'number' && isNaN(value))) {
     return true;
   }
+};
+
+Utils.hasMethods = function(obj /*, method list as strings */){
+  var i = 1, methodName;
+  while((methodName = arguments[i++])){
+    if(this.isFunction(obj[methodName])) {
+      return false;
+    }
+  }
+  return true;
 };
 
 Utils.createRandomToken = function(size, base) {
@@ -21253,22 +21012,144 @@ Utils.calculateMD5 = function(string) {
   return temp.toLowerCase();
 };
 
-},{"./Constants":1,"./Grammar":6,"./URI":23}],25:[function(require,module,exports){
-var info = function () {return undefined;};
-var error = function () {return undefined;};
-module.exports = { loginfo : function () {
-          var args = Array.prototype.slice.call(arguments);
-          info.apply(console,args);
-          },
-       logerror : function() {
-          var args = Array.prototype.slice.call(arguments);
-          error.apply(console,args);
-          },
-       setError : function(fn) { error = fn; },
-       setInfo : function(fn) { info = fn; }
-    };
+},{"./Constants":1,"./Grammar":6,"./URI":24}],26:[function(require,module,exports){
+module.exports = WebSocketInterface;
 
-},{}],26:[function(require,module,exports){
+/**
+ * Dependencies.
+ */
+var Grammar = require('./Grammar');
+var debug = require('debug')('JsSIP:WebSocketInterface');
+var debugerror = require('debug')('JsSIP:ERROR:WebSocketInterface');
+debugerror.log = console.warn.bind(console);
+
+function WebSocketInterface(url) {
+  debug('new() [url:"%s"]', url);
+
+  var sip_uri = null;
+  var via_transport = null;
+
+  this.ws = null;
+
+  // setting the 'scheme' alters the sip_uri too (used in SIP Route header field)
+  Object.defineProperties(this, {
+    via_transport: {
+      get: function() { return via_transport; },
+      set: function(transport) {
+        via_transport = transport.toUpperCase();
+      }
+    },
+    sip_uri:  { get: function() { return sip_uri; }},
+    url:      { get: function() { return url; }}
+  });
+
+  var parsed_url = Grammar.parse(url, 'absoluteURI');
+
+  if (parsed_url === -1) {
+    debugerror('invalid WebSocket URI: ' + url);
+    throw new TypeError('Invalid argument: ' + url);
+  } else if(parsed_url.scheme !== 'wss' && parsed_url.scheme !== 'ws') {
+    debugerror('invalid WebSocket URI scheme: ' + parsed_url.scheme);
+    throw new TypeError('Invalid argument: ' + url);
+  } else {
+    sip_uri = 'sip:' + parsed_url.host +
+      (parsed_url.port ? ':' + parsed_url.port : '') + ';transport=ws';
+    this.via_transport = parsed_url.scheme;
+  }
+}
+
+WebSocketInterface.prototype.connect = function () {
+  debug('connect()');
+
+  if (this.isConnected()) {
+    debug('WebSocket ' + this.url + ' is already connected');
+    return;
+  } else if (this.isConnecting()) {
+    debug('WebSocket ' + this.url + ' is connecting');
+    return;
+  }
+
+  if (this.ws) {
+    this.ws.close();
+  }
+
+  debug('connecting to WebSocket ' + this.url);
+
+  try {
+    this.ws = new WebSocket(this.url, 'sip');
+
+    this.ws.binaryType = 'arraybuffer';
+
+    this.ws.onopen    = onOpen.bind(this);
+    this.ws.onclose   = onClose.bind(this);
+    this.ws.onmessage = onMessage.bind(this);
+    this.ws.onerror   = onError.bind(this);
+  } catch(e) {
+    onError.call(this, e);
+  }
+};
+
+WebSocketInterface.prototype.disconnect = function() {
+  debug('disconnect()');
+
+  if (this.ws) {
+    this.ws.close();
+    this.ws = null;
+  }
+};
+
+WebSocketInterface.prototype.send = function(message) {
+  debug('send()');
+
+  if (this.isConnected()) {
+    this.ws.send(message);
+    return true;
+  } else {
+    debugerror('unable to send message, WebSocket is not open');
+    return false;
+  }
+};
+
+WebSocketInterface.prototype.isConnected = function() {
+  return this.ws && this.ws.readyState === this.ws.OPEN;
+};
+
+WebSocketInterface.prototype.isConnecting = function() {
+  return this.ws && this.ws.readyState === this.ws.CONNECTING;
+};
+
+
+/**
+ * WebSocket Event Handlers
+ */
+
+function onOpen() {
+  debug('WebSocket ' + this.url + ' connected');
+
+  this.onconnect();
+}
+
+function onClose(e) {
+  debug('WebSocket ' + this.url + ' closed');
+
+  if (e.wasClean === false) {
+    debug('WebSocket abrupt disconnection');
+  }
+
+  this.ondisconnect(e.wasClean, e.code, e.reason);
+}
+
+function onMessage(e) {
+  debug('received WebSocket message');
+
+  this.ondata(e.data);
+}
+
+function onError(e) {
+  debugerror('WebSocket ' + this.url + ' error: '+ e);
+}
+
+},{"./Grammar":6,"debug":33}],27:[function(require,module,exports){
 module.exports = sanityCheck;
 
 
@@ -21276,8 +21157,6 @@ module.exports = sanityCheck;
  * Dependencies.
  */
 var debug = require('debug')('JsSIP:sanityCheck');
-var logger = require('./VoxboneLogger.js');
-debug.log = logger.loginfo.bind(console);
 var JsSIP_C = require('./Constants');
 var SIPMessage = require('./SIPMessage');
 var Utils = require('./Utils');
@@ -21497,7 +21376,7 @@ function reply(status_code) {
   transport.send(response);
 }
 
-},{"./Constants":1,"./SIPMessage":18,"./Utils":24,"./VoxboneLogger.js":25,"debug":32}],27:[function(require,module,exports){
+},{"./Constants":1,"./SIPMessage":18,"./Utils":25,"debug":33}],28:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -21557,8 +21436,12 @@ EventEmitter.prototype.emit = function(type) {
       er = arguments[1];
       if (er instanceof Error) {
         throw er; // Unhandled 'error' event
+      } else {
+        // At least give some kind of context to the user
+        var err = new Error('Uncaught, unspecified "error" event. (' + er + ')');
+        err.context = er;
+        throw err;
       }
-      throw TypeError('Uncaught, unspecified "error" event.');
     }
   }
 
@@ -21581,18 +21464,11 @@ EventEmitter.prototype.emit = function(type) {
         break;
       // slower
       default:
-        len = arguments.length;
-        args = new Array(len - 1);
-        for (i = 1; i < len; i++)
-          args[i - 1] = arguments[i];
+        args = Array.prototype.slice.call(arguments, 1);
         handler.apply(this, args);
     }
   } else if (isObject(handler)) {
-    len = arguments.length;
-    args = new Array(len - 1);
-    for (i = 1; i < len; i++)
-      args[i - 1] = arguments[i];
-
+    args = Array.prototype.slice.call(arguments, 1);
     listeners = handler.slice();
     len = listeners.length;
     for (i = 0; i < len; i++)
@@ -21630,7 +21506,6 @@ EventEmitter.prototype.addListener = function(type, listener) {
 
   // Check for listener leak
   if (isObject(this._events[type]) && !this._events[type].warned) {
-    var m;
     if (!isUndefined(this._maxListeners)) {
       m = this._maxListeners;
     } else {
@@ -21752,7 +21627,7 @@ EventEmitter.prototype.removeAllListeners = function(type) {
 
   if (isFunction(listeners)) {
     this.removeListener(type, listeners);
-  } else {
+  } else if (listeners) {
     // LIFO order
     while (listeners.length)
       this.removeListener(type, listeners[listeners.length - 1]);
@@ -21773,15 +21648,20 @@ EventEmitter.prototype.listeners = function(type) {
   return ret;
 };
 
+EventEmitter.prototype.listenerCount = function(type) {
+  if (this._events) {
+    var evlistener = this._events[type];
+
+    if (isFunction(evlistener))
+      return 1;
+    else if (evlistener)
+      return evlistener.length;
+  }
+  return 0;
+};
+
 EventEmitter.listenerCount = function(emitter, type) {
-  var ret;
-  if (!emitter._events || !emitter._events[type])
-    ret = 0;
-  else if (isFunction(emitter._events[type]))
-    ret = 1;
-  else
-    ret = emitter._events[type].length;
-  return ret;
+  return emitter.listenerCount(type);
 };
 
 function isFunction(arg) {
@@ -21800,41 +21680,105 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],28:[function(require,module,exports){
-if (typeof Object.create === 'function') {
-  // implementation from standard node.js 'util' module
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-  };
-} else {
-  // old school shim for old browsers
-  module.exports = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor
-    var TempCtor = function () {}
-    TempCtor.prototype = superCtor.prototype
-    ctor.prototype = new TempCtor()
-    ctor.prototype.constructor = ctor
-  }
-}
-
 },{}],29:[function(require,module,exports){
 // shim for using process in browser
-
 var process = module.exports = {};
+
+// cached from whatever global is present so that test runners that stub it
+// don't break things.  But we need to wrap it in a try catch in case it is
+// wrapped in strict mode code which doesn't define any globals.  It's inside a
+// function because try/catches deoptimize in certain engines.
+
+var cachedSetTimeout;
+var cachedClearTimeout;
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+(function () {
+    try {
+        if (typeof setTimeout === 'function') {
+            cachedSetTimeout = setTimeout;
+        } else {
+            cachedSetTimeout = defaultSetTimout;
+        }
+    } catch (e) {
+        cachedSetTimeout = defaultSetTimout;
+    }
+    try {
+        if (typeof clearTimeout === 'function') {
+            cachedClearTimeout = clearTimeout;
+        } else {
+            cachedClearTimeout = defaultClearTimeout;
+        }
+    } catch (e) {
+        cachedClearTimeout = defaultClearTimeout;
+    }
+} ())
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
 var queue = [];
 var draining = false;
 var currentQueue;
 var queueIndex = -1;
 
 function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
     draining = false;
     if (currentQueue.length) {
         queue = currentQueue.concat(queue);
@@ -21850,7 +21794,7 @@ function drainQueue() {
     if (draining) {
         return;
     }
-    var timeout = setTimeout(cleanUpNextTick);
+    var timeout = runTimeout(cleanUpNextTick);
     draining = true;
 
     var len = queue.length;
@@ -21867,7 +21811,7 @@ function drainQueue() {
     }
     currentQueue = null;
     draining = false;
-    clearTimeout(timeout);
+    runClearTimeout(timeout);
 }
 
 process.nextTick = function (fun) {
@@ -21879,7 +21823,7 @@ process.nextTick = function (fun) {
     }
     queue.push(new Item(fun, args));
     if (queue.length === 1 && !draining) {
-        setTimeout(drainQueue, 0);
+        runTimeout(drainQueue);
     }
 };
 
@@ -21919,13 +21863,38 @@ process.chdir = function (dir) {
 process.umask = function() { return 0; };
 
 },{}],30:[function(require,module,exports){
+if (typeof Object.create === 'function') {
+  // implementation from standard node.js 'util' module
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+} else {
+  // old school shim for old browsers
+  module.exports = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor
+    var TempCtor = function () {}
+    TempCtor.prototype = superCtor.prototype
+    ctor.prototype = new TempCtor()
+    ctor.prototype.constructor = ctor
+  }
+}
+
+},{}],31:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],31:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -22515,7 +22484,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":30,"_process":29,"inherits":28}],32:[function(require,module,exports){
+},{"./support/isBuffer":31,"_process":29,"inherits":30}],33:[function(require,module,exports){
 
 /**
  * This is the web browser implementation of `debug()`.
@@ -22685,7 +22654,7 @@ function localstorage(){
   } catch (e) {}
 }
 
-},{"./debug":33}],33:[function(require,module,exports){
+},{"./debug":34}],34:[function(require,module,exports){
 
 /**
  * This is the common logic for both the Node.js and web browser
@@ -22884,7 +22853,7 @@ function coerce(val) {
   return val;
 }
 
-},{"ms":34}],34:[function(require,module,exports){
+},{"ms":35}],35:[function(require,module,exports){
 /**
  * Helpers.
  */
@@ -23011,1707 +22980,7 @@ function plural(ms, n, name) {
   return Math.ceil(ms / n) + ' ' + name + 's';
 }
 
-},{}],35:[function(require,module,exports){
-(function (global){
-'use strict';
-
-// Expose the Adapter function/object.
-module.exports = Adapter;
-
-
-// Dependencies
-
-var browser = require('bowser'),
-  debug = require('debug')('rtcninja:Adapter'),
-  debugerror = require('debug')('rtcninja:ERROR:Adapter'),
-
-  // Internal vars
-  getUserMedia = null,
-  RTCPeerConnection = null,
-  RTCSessionDescription = null,
-  RTCIceCandidate = null,
-  MediaStreamTrack = null,
-  getMediaDevices = null,
-  attachMediaStream = null,
-  canRenegotiate = false,
-  oldSpecRTCOfferOptions = false,
-  browserVersion = Number(browser.version) || 0,
-  isDesktop = !!(!browser.mobile && !browser.tablet),
-  hasWebRTC = false,
-  virtGlobal, virtNavigator;
-
-debugerror.log = console.warn.bind(console);
-
-// Dirty trick to get this library working in a Node-webkit env with browserified libs
-virtGlobal = global.window || global;
-// Don't fail in Node
-virtNavigator = virtGlobal.navigator || {};
-
-
-// Constructor.
-
-function Adapter(options) {
-  // Chrome desktop, Chrome Android, Opera desktop, Opera Android, Android native browser
-  // or generic Webkit browser.
-  if (
-    (isDesktop && browser.chrome && browserVersion >= 32) ||
-    (browser.android && browser.chrome && browserVersion >= 39) ||
-    (isDesktop && browser.opera && browserVersion >= 27) ||
-    (browser.android && browser.opera && browserVersion >= 24) ||
-    (browser.android && browser.webkit && !browser.chrome && browserVersion >= 37) ||
-    (virtNavigator.webkitGetUserMedia && virtGlobal.webkitRTCPeerConnection)
-  ) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.webkitGetUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.webkitRTCPeerConnection;
-    RTCSessionDescription = virtGlobal.RTCSessionDescription;
-    RTCIceCandidate = virtGlobal.RTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = true;
-    oldSpecRTCOfferOptions = false;
-  // Firefox desktop, Firefox Android.
-  } else if (
-    (isDesktop && browser.firefox && browserVersion >= 22) ||
-    (browser.android && browser.firefox && browserVersion >= 33) ||
-    (virtNavigator.mozGetUserMedia && virtGlobal.mozRTCPeerConnection)
-  ) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.mozRTCPeerConnection;
-    RTCSessionDescription = virtGlobal.mozRTCSessionDescription;
-    RTCIceCandidate = virtGlobal.mozRTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    attachMediaStream = function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = false;
-    oldSpecRTCOfferOptions = false;
-    // WebRTC plugin required. For example IE or Safari with the Temasys plugin.
-  } else if (
-    options.plugin &&
-    typeof options.plugin.isRequired === 'function' &&
-    options.plugin.isRequired() &&
-    typeof options.plugin.isInstalled === 'function' &&
-    options.plugin.isInstalled()
-  ) {
-    var pluginiface = options.plugin.interface;
-
-    hasWebRTC = true;
-    getUserMedia = pluginiface.getUserMedia;
-    RTCPeerConnection = pluginiface.RTCPeerConnection;
-    RTCSessionDescription = pluginiface.RTCSessionDescription;
-    RTCIceCandidate = pluginiface.RTCIceCandidate;
-    MediaStreamTrack = pluginiface.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = pluginiface.attachMediaStream;
-    canRenegotiate = pluginiface.canRenegotiate;
-    oldSpecRTCOfferOptions = true;  // TODO: Update when fixed in the plugin.
-  // Best effort (may be adater.js is loaded).
-  } else if (virtNavigator.getUserMedia && virtGlobal.RTCPeerConnection) {
-    hasWebRTC = true;
-    getUserMedia = virtNavigator.getUserMedia.bind(virtNavigator);
-    RTCPeerConnection = virtGlobal.RTCPeerConnection;
-    RTCSessionDescription = virtGlobal.RTCSessionDescription;
-    RTCIceCandidate = virtGlobal.RTCIceCandidate;
-    MediaStreamTrack = virtGlobal.MediaStreamTrack;
-    if (MediaStreamTrack && MediaStreamTrack.getSources) {
-      getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
-    } else if (virtNavigator.getMediaDevices) {
-      getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
-    }
-    attachMediaStream = virtGlobal.attachMediaStream || function (element, stream) {
-      element.src = URL.createObjectURL(stream);
-      return element;
-    };
-    canRenegotiate = false;
-    oldSpecRTCOfferOptions = false;
-  }
-
-
-  function throwNonSupported(item) {
-    return function () {
-      throw new Error('rtcninja: WebRTC not supported, missing ' + item +
-      ' [browser: ' + browser.name + ' ' + browser.version + ']');
-    };
-  }
-
-
-  // Public API.
-
-  // Expose a WebRTC checker.
-  Adapter.hasWebRTC = function () {
-    return hasWebRTC;
-  };
-
-  // Expose getUserMedia.
-  if (getUserMedia) {
-    Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
-      debug('getUserMedia() | constraints: %o', constraints);
-
-      try {
-        getUserMedia(constraints,
-          function (stream) {
-            debug('getUserMedia() | success');
-            if (successCallback) {
-              successCallback(stream);
-            }
-          },
-          function (error) {
-            debug('getUserMedia() | error:', error);
-            if (errorCallback) {
-              errorCallback(error);
-            }
-          }
-        );
-      }
-      catch (error) {
-        debugerror('getUserMedia() | error:', error);
-        if (errorCallback) {
-          errorCallback(error);
-        }
-      }
-    };
-  } else {
-    Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
-      debugerror('getUserMedia() | WebRTC not supported');
-      if (errorCallback) {
-        errorCallback(new Error('rtcninja: WebRTC not supported, missing ' +
-        'getUserMedia [browser: ' + browser.name + ' ' + browser.version + ']'));
-      } else {
-        throwNonSupported('getUserMedia');
-      }
-    };
-  }
-
-  // Expose RTCPeerConnection.
-  Adapter.RTCPeerConnection = RTCPeerConnection || throwNonSupported('RTCPeerConnection');
-
-  // Expose RTCSessionDescription.
-  Adapter.RTCSessionDescription = RTCSessionDescription || throwNonSupported('RTCSessionDescription');
-
-  // Expose RTCIceCandidate.
-  Adapter.RTCIceCandidate = RTCIceCandidate || throwNonSupported('RTCIceCandidate');
-
-  // Expose MediaStreamTrack.
-  Adapter.MediaStreamTrack = MediaStreamTrack || throwNonSupported('MediaStreamTrack');
-
-  // Expose getMediaDevices.
-  Adapter.getMediaDevices = getMediaDevices;
-
-  // Expose MediaStreamTrack.
-  Adapter.attachMediaStream = attachMediaStream || throwNonSupported('attachMediaStream');
-
-  // Expose canRenegotiate attribute.
-  Adapter.canRenegotiate = canRenegotiate;
-
-  // Expose closeMediaStream.
-  Adapter.closeMediaStream = function (stream) {
-    if (!stream) {
-      return;
-    }
-
-    // Latest spec states that MediaStream has no stop() method and instead must
-    // call stop() on every MediaStreamTrack.
-    if (MediaStreamTrack && MediaStreamTrack.prototype && MediaStreamTrack.prototype.stop) {
-      debug('closeMediaStream() | calling stop() on all the MediaStreamTrack');
-
-      var tracks, i, len;
-
-      if (stream.getTracks) {
-        tracks = stream.getTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-      } else {
-        tracks = stream.getAudioTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-
-        tracks = stream.getVideoTracks();
-        for (i = 0, len = tracks.length; i < len; i += 1) {
-          tracks[i].stop();
-        }
-      }
-    // Deprecated by the spec, but still in use.
-    } else if (typeof stream.stop === 'function') {
-      debug('closeMediaStream() | calling stop() on the MediaStream');
-
-      stream.stop();
-    }
-  };
-
-  // Expose fixPeerConnectionConfig.
-  Adapter.fixPeerConnectionConfig = function (pcConfig) {
-    var i, len, iceServer, hasUrls, hasUrl;
-
-    if (!Array.isArray(pcConfig.iceServers)) {
-      pcConfig.iceServers = [];
-    }
-
-    for (i = 0, len = pcConfig.iceServers.length; i < len; i += 1) {
-      iceServer = pcConfig.iceServers[i];
-      hasUrls = iceServer.hasOwnProperty('urls');
-      hasUrl = iceServer.hasOwnProperty('url');
-
-      if (typeof iceServer === 'object') {
-        // Has .urls but not .url, so add .url with a single string value.
-        if (hasUrls && !hasUrl) {
-          iceServer.url = (Array.isArray(iceServer.urls) ? iceServer.urls[0] : iceServer.urls);
-        // Has .url but not .urls, so add .urls with same value.
-        } else if (!hasUrls && hasUrl) {
-          iceServer.urls = (Array.isArray(iceServer.url) ? iceServer.url.slice() : iceServer.url);
-        }
-
-        // Ensure .url is a single string.
-        if (hasUrl && Array.isArray(iceServer.url)) {
-          iceServer.url = iceServer.url[0];
-        }
-      }
-    }
-  };
-
-  // Expose fixRTCOfferOptions.
-  Adapter.fixRTCOfferOptions = function (options) {
-    options = options || {};
-
-    // New spec.
-    if (!oldSpecRTCOfferOptions) {
-      if (options.mandatory && options.mandatory.OfferToReceiveAudio) {
-        options.offerToReceiveAudio = 1;
-      }
-      if (options.mandatory && options.mandatory.OfferToReceiveVideo) {
-        options.offerToReceiveVideo = 1;
-      }
-      delete options.mandatory;
-    // Old spec.
-    } else {
-      if (options.offerToReceiveAudio) {
-        options.mandatory = options.mandatory || {};
-        options.mandatory.OfferToReceiveAudio = true;
-      }
-      if (options.offerToReceiveVideo) {
-        options.mandatory = options.mandatory || {};
-        options.mandatory.OfferToReceiveVideo = true;
-      }
-    }
-  };
-
-  return Adapter;
-}
-
-}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"bowser":39,"debug":32}],36:[function(require,module,exports){
-'use strict';
-
-// Expose the RTCPeerConnection class.
-module.exports = RTCPeerConnection;
-
-
-// Dependencies.
-
-var merge = require('merge'),
-  debug = require('debug')('rtcninja:RTCPeerConnection'),
-  debugerror = require('debug')('rtcninja:ERROR:RTCPeerConnection'),
-  Adapter = require('./Adapter'),
-
-  // Internal constants.
-  C = {
-    REGEXP_NORMALIZED_CANDIDATE: new RegExp(/^candidate:/i),
-    REGEXP_FIX_CANDIDATE: new RegExp(/(^a=|\r|\n)/gi),
-    REGEXP_RELAY_CANDIDATE: new RegExp(/ relay /i),
-    REGEXP_SDP_CANDIDATES: new RegExp(/^a=candidate:.*\r\n/igm),
-    REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm)
-  },
-
-  // Internal variables.
-  VAR = {
-    normalizeCandidate: null
-  };
-
-debugerror.log = console.warn.bind(console);
-
-
-// Constructor
-
-function RTCPeerConnection(pcConfig, pcConstraints) {
-  debug('new | pcConfig: %o', pcConfig);
-
-  // Set this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
-
-  // NOTE: Deprecated pcConstraints argument.
-  this.pcConstraints = pcConstraints;
-
-  // Own version of the localDescription.
-  this.ourLocalDescription = null;
-
-  // Latest values of PC attributes to avoid events with same value.
-  this.ourSignalingState = null;
-  this.ourIceConnectionState = null;
-  this.ourIceGatheringState = null;
-
-  // Timer for options.gatheringTimeout.
-  this.timerGatheringTimeout = null;
-
-  // Timer for options.gatheringTimeoutAfterRelay.
-  this.timerGatheringTimeoutAfterRelay = null;
-
-  // Flag to ignore new gathered ICE candidates.
-  this.ignoreIceGathering = false;
-
-  // Flag set when closed.
-  this.closed = false;
-
-  // Set RTCPeerConnection.
-  setPeerConnection.call(this);
-
-  // Set properties.
-  setProperties.call(this);
-}
-
-
-// Public API.
-
-RTCPeerConnection.prototype.createOffer = function (successCallback, failureCallback, options) {
-  debug('createOffer()');
-
-  var self = this;
-
-  Adapter.fixRTCOfferOptions(options);
-
-  this.pc.createOffer(
-    function (offer) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('createOffer() | success');
-      if (successCallback) {
-        successCallback(offer);
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('createOffer() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    },
-    options
-  );
-};
-
-
-RTCPeerConnection.prototype.createAnswer = function (successCallback, failureCallback, options) {
-  debug('createAnswer()');
-
-  var self = this;
-
-  this.pc.createAnswer(
-    function (answer) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('createAnswer() | success');
-      if (successCallback) {
-        successCallback(answer);
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('createAnswer() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    },
-    options
-  );
-};
-
-
-RTCPeerConnection.prototype.setLocalDescription = function (description, successCallback, failureCallback) {
-  debug('setLocalDescription()');
-
-  var self = this;
-
-  this.pc.setLocalDescription(
-    description,
-    // success.
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('setLocalDescription() | success');
-
-      // Clear gathering timers.
-      clearTimeout(self.timerGatheringTimeout);
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
-
-      runTimerGatheringTimeout();
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    // failure
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('setLocalDescription() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
-
-  // Enable (again) ICE gathering.
-  this.ignoreIceGathering = false;
-
-  // Handle gatheringTimeout.
-  function runTimerGatheringTimeout() {
-    if (typeof self.options.gatheringTimeout !== 'number') {
-      return;
-    }
-    // If setLocalDescription was already called, it may happen that
-    // ICE gathering is not needed, so don't run this timer.
-    if (self.pc.iceGatheringState === 'complete') {
-      return;
-    }
-
-    debug('setLocalDescription() | ending gathering in %d ms (gatheringTimeout option)',
-      self.options.gatheringTimeout);
-
-    self.timerGatheringTimeout = setTimeout(function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-
-      debug('forced end of candidates after gatheringTimeout timeout');
-
-      // Clear gathering timers.
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
-
-      // Ignore new candidates.
-      self.ignoreIceGathering = true;
-      if (self.onicecandidate) {
-        self.onicecandidate({ candidate: null }, null);
-      }
-
-    }, self.options.gatheringTimeout);
-  }
-};
-
-
-RTCPeerConnection.prototype.setRemoteDescription = function (description, successCallback, failureCallback) {
-  debug('setRemoteDescription()');
-
-  var self = this;
-
-  this.pc.setRemoteDescription(
-    description,
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('setRemoteDescription() | success');
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('setRemoteDescription() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
-};
-
-
-RTCPeerConnection.prototype.updateIce = function (pcConfig) {
-  debug('updateIce() | pcConfig: %o', pcConfig);
-
-  // Update this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
-
-  this.pc.updateIce(this.pcConfig);
-
-  // Enable (again) ICE gathering.
-  this.ignoreIceGathering = false;
-};
-
-
-RTCPeerConnection.prototype.addIceCandidate = function (candidate, successCallback, failureCallback) {
-  debug('addIceCandidate() | candidate: %o', candidate);
-
-  var self = this;
-
-  this.pc.addIceCandidate(
-    candidate,
-    function () {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debug('addIceCandidate() | success');
-      if (successCallback) {
-        successCallback();
-      }
-    },
-    function (error) {
-      if (isClosed.call(self)) {
-        return;
-      }
-      debugerror('addIceCandidate() | error:', error);
-      if (failureCallback) {
-        failureCallback(error);
-      }
-    }
-  );
-};
-
-
-RTCPeerConnection.prototype.getConfiguration = function () {
-  debug('getConfiguration()');
-
-  return this.pc.getConfiguration();
-};
-
-
-RTCPeerConnection.prototype.getLocalStreams = function () {
-  debug('getLocalStreams()');
-
-  return this.pc.getLocalStreams();
-};
-
-
-RTCPeerConnection.prototype.getRemoteStreams = function () {
-  debug('getRemoteStreams()');
-
-  return this.pc.getRemoteStreams();
-};
-
-
-RTCPeerConnection.prototype.getStreamById = function (streamId) {
-  debug('getStreamById() | streamId: %s', streamId);
-
-  return this.pc.getStreamById(streamId);
-};
-
-
-RTCPeerConnection.prototype.addStream = function (stream) {
-  debug('addStream() | stream: %s', stream);
-
-  this.pc.addStream(stream);
-};
-
-
-RTCPeerConnection.prototype.removeStream = function (stream) {
-  debug('removeStream() | stream: %o', stream);
-
-  this.pc.removeStream(stream);
-};
-
-
-RTCPeerConnection.prototype.close = function () {
-  debug('close()');
-
-  this.closed = true;
-
-  // Clear gathering timers.
-  clearTimeout(this.timerGatheringTimeout);
-  delete this.timerGatheringTimeout;
-  clearTimeout(this.timerGatheringTimeoutAfterRelay);
-  delete this.timerGatheringTimeoutAfterRelay;
-
-  this.pc.close();
-};
-
-
-RTCPeerConnection.prototype.createDataChannel = function () {
-  debug('createDataChannel()');
-
-  return this.pc.createDataChannel.apply(this.pc, arguments);
-};
-
-
-RTCPeerConnection.prototype.createDTMFSender = function (track) {
-  debug('createDTMFSender()');
-
-  return this.pc.createDTMFSender(track);
-};
-
-
-RTCPeerConnection.prototype.getStats = function () {
-  debug('getStats()');
-
-  return this.pc.getStats.apply(this.pc, arguments);
-};
-
-
-RTCPeerConnection.prototype.setIdentityProvider = function () {
-  debug('setIdentityProvider()');
-
-  return this.pc.setIdentityProvider.apply(this.pc, arguments);
-};
-
-
-RTCPeerConnection.prototype.getIdentityAssertion = function () {
-  debug('getIdentityAssertion()');
-
-  return this.pc.getIdentityAssertion();
-};
-
-
-RTCPeerConnection.prototype.reset = function (pcConfig) {
-  debug('reset() | pcConfig: %o', pcConfig);
-
-  var pc = this.pc;
-
-  // Remove events in the old PC.
-  pc.onnegotiationneeded = null;
-  pc.onicecandidate = null;
-  pc.onaddstream = null;
-  pc.onremovestream = null;
-  pc.ondatachannel = null;
-  pc.onsignalingstatechange = null;
-  pc.oniceconnectionstatechange = null;
-  pc.onicegatheringstatechange = null;
-  pc.onidentityresult = null;
-  pc.onpeeridentity = null;
-  pc.onidpassertionerror = null;
-  pc.onidpvalidationerror = null;
-
-  // Clear gathering timers.
-  clearTimeout(this.timerGatheringTimeout);
-  delete this.timerGatheringTimeout;
-  clearTimeout(this.timerGatheringTimeoutAfterRelay);
-  delete this.timerGatheringTimeoutAfterRelay;
-
-  // Silently close the old PC.
-  debug('reset() | closing current peerConnection');
-  pc.close();
-
-  // Set this.pcConfig and this.options.
-  setConfigurationAndOptions.call(this, pcConfig);
-
-  // Create a new PC.
-  setPeerConnection.call(this);
-};
-
-
-// Private Helpers.
-
-function setConfigurationAndOptions(pcConfig) {
-  // Clone pcConfig.
-  this.pcConfig = merge(true, pcConfig);
-
-  // Fix pcConfig.
-  Adapter.fixPeerConnectionConfig(this.pcConfig);
-
-  this.options = {
-    iceTransportsRelay: (this.pcConfig.iceTransports === 'relay'),
-    iceTransportsNone: (this.pcConfig.iceTransports === 'none'),
-    gatheringTimeout: this.pcConfig.gatheringTimeout,
-    gatheringTimeoutAfterRelay: this.pcConfig.gatheringTimeoutAfterRelay
-  };
-
-  // Remove custom rtcninja.RTCPeerConnection options from pcConfig.
-  delete this.pcConfig.gatheringTimeout;
-  delete this.pcConfig.gatheringTimeoutAfterRelay;
-
-  debug('setConfigurationAndOptions | processed pcConfig: %o', this.pcConfig);
-}
-
-
-function isClosed() {
-  return ((this.closed) || (this.pc && this.pc.iceConnectionState === 'closed'));
-}
-
-
-function setEvents() {
-  var self = this,
-    pc = this.pc;
-
-  pc.onnegotiationneeded = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onnegotiationneeded()');
-    if (self.onnegotiationneeded) {
-      self.onnegotiationneeded(event);
-    }
-  };
-
-  pc.onicecandidate = function (event) {
-    var candidate, isRelay, newCandidate;
-
-    if (isClosed.call(self)) {
-      return;
-    }
-    if (self.ignoreIceGathering) {
-      return;
-    }
-
-    // Ignore any candidate (event the null one) if iceTransports:'none' is set.
-    if (self.options.iceTransportsNone) {
-      return;
-    }
-
-    candidate = event.candidate;
-
-    if (candidate) {
-      isRelay = C.REGEXP_RELAY_CANDIDATE.test(candidate.candidate);
-
-      // Ignore if just relay candidates are requested.
-      if (self.options.iceTransportsRelay && !isRelay) {
-        return;
-      }
-
-      // Handle gatheringTimeoutAfterRelay.
-      if (isRelay && !self.timerGatheringTimeoutAfterRelay &&
-        (typeof self.options.gatheringTimeoutAfterRelay === 'number')) {
-        debug('onicecandidate() | first relay candidate found, ending gathering in %d ms', self.options.gatheringTimeoutAfterRelay);
-
-        self.timerGatheringTimeoutAfterRelay = setTimeout(function () {
-          if (isClosed.call(self)) {
-            return;
-          }
-
-          debug('forced end of candidates after timeout');
-
-          // Clear gathering timers.
-          delete self.timerGatheringTimeoutAfterRelay;
-          clearTimeout(self.timerGatheringTimeout);
-          delete self.timerGatheringTimeout;
-
-          // Ignore new candidates.
-          self.ignoreIceGathering = true;
-          if (self.onicecandidate) {
-            self.onicecandidate({candidate: null}, null);
-          }
-        }, self.options.gatheringTimeoutAfterRelay);
-      }
-
-      newCandidate = new Adapter.RTCIceCandidate({
-        sdpMid: candidate.sdpMid,
-        sdpMLineIndex: candidate.sdpMLineIndex,
-        candidate: candidate.candidate
-      });
-
-      // Force correct candidate syntax (just check it once).
-      if (VAR.normalizeCandidate === null) {
-        if (C.REGEXP_NORMALIZED_CANDIDATE.test(candidate.candidate)) {
-          VAR.normalizeCandidate = false;
-        } else {
-          debug('onicecandidate() | normalizing ICE candidates syntax (remove "a=" and "\\r\\n")');
-          VAR.normalizeCandidate = true;
-        }
-      }
-      if (VAR.normalizeCandidate) {
-        newCandidate.candidate = candidate.candidate.replace(C.REGEXP_FIX_CANDIDATE, '');
-      }
-
-      debug(
-        'onicecandidate() | m%d(%s) %s',
-        newCandidate.sdpMLineIndex,
-        newCandidate.sdpMid || 'no mid', newCandidate.candidate);
-      if (self.onicecandidate) {
-        self.onicecandidate(event, newCandidate);
-      }
-    // Null candidate (end of candidates).
-    } else {
-      debug('onicecandidate() | end of candidates');
-
-      // Clear gathering timers.
-      clearTimeout(self.timerGatheringTimeout);
-      delete self.timerGatheringTimeout;
-      clearTimeout(self.timerGatheringTimeoutAfterRelay);
-      delete self.timerGatheringTimeoutAfterRelay;
-      if (self.onicecandidate) {
-        self.onicecandidate(event, null);
-      }
-    }
-  };
-
-  pc.onaddstream = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onaddstream() | stream: %o', event.stream);
-    if (self.onaddstream) {
-      self.onaddstream(event, event.stream);
-    }
-  };
-
-  pc.onremovestream = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onremovestream() | stream: %o', event.stream);
-    if (self.onremovestream) {
-      self.onremovestream(event, event.stream);
-    }
-  };
-
-  pc.ondatachannel = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('ondatachannel() | datachannel: %o', event.channel);
-    if (self.ondatachannel) {
-      self.ondatachannel(event, event.channel);
-    }
-  };
-
-  pc.onsignalingstatechange = function (event) {
-    if (pc.signalingState === self.ourSignalingState) {
-      return;
-    }
-
-    debug('onsignalingstatechange() | signalingState: %s', pc.signalingState);
-    self.ourSignalingState = pc.signalingState;
-    if (self.onsignalingstatechange) {
-      self.onsignalingstatechange(event, pc.signalingState);
-    }
-  };
-
-  pc.oniceconnectionstatechange = function (event) {
-    if (pc.iceConnectionState === self.ourIceConnectionState) {
-      return;
-    }
-
-    debug('oniceconnectionstatechange() | iceConnectionState: %s', pc.iceConnectionState);
-    self.ourIceConnectionState = pc.iceConnectionState;
-    if (self.oniceconnectionstatechange) {
-      self.oniceconnectionstatechange(event, pc.iceConnectionState);
-    }
-  };
-
-  pc.onicegatheringstatechange = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    if (pc.iceGatheringState === self.ourIceGatheringState) {
-      return;
-    }
-
-    debug('onicegatheringstatechange() | iceGatheringState: %s', pc.iceGatheringState);
-    self.ourIceGatheringState = pc.iceGatheringState;
-    if (self.onicegatheringstatechange) {
-      self.onicegatheringstatechange(event, pc.iceGatheringState);
-    }
-  };
-
-  pc.onidentityresult = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onidentityresult()');
-    if (self.onidentityresult) {
-      self.onidentityresult(event);
-    }
-  };
-
-  pc.onpeeridentity = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onpeeridentity()');
-    if (self.onpeeridentity) {
-      self.onpeeridentity(event);
-    }
-  };
-
-  pc.onidpassertionerror = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onidpassertionerror()');
-    if (self.onidpassertionerror) {
-      self.onidpassertionerror(event);
-    }
-  };
-
-  pc.onidpvalidationerror = function (event) {
-    if (isClosed.call(self)) {
-      return;
-    }
-
-    debug('onidpvalidationerror()');
-    if (self.onidpvalidationerror) {
-      self.onidpvalidationerror(event);
-    }
-  };
-}
-
-
-function setPeerConnection() {
-  // Create a RTCPeerConnection.
-  if (!this.pcConstraints) {
-    this.pc = new Adapter.RTCPeerConnection(this.pcConfig);
-  } else {
-    // NOTE: Deprecated.
-    this.pc = new Adapter.RTCPeerConnection(this.pcConfig, this.pcConstraints);
-  }
-
-  // Set RTC events.
-  setEvents.call(this);
-}
-
-
-function getLocalDescription() {
-  var pc = this.pc,
-    options = this.options,
-    sdp = null;
-
-  if (!pc.localDescription) {
-    this.ourLocalDescription = null;
-    return null;
-  }
-
-  // Mangle the SDP string.
-  if (options.iceTransportsRelay) {
-    sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_NON_RELAY_CANDIDATES, '');
-  } else if (options.iceTransportsNone) {
-    sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_CANDIDATES, '');
-  }
-
-  this.ourLocalDescription = new Adapter.RTCSessionDescription({
-    type: pc.localDescription.type,
-    sdp: sdp || pc.localDescription.sdp
-  });
-
-  return this.ourLocalDescription;
-}
-
-
-function setProperties() {
-  var self = this;
-
-  Object.defineProperties(this, {
-    peerConnection: {
-      get: function () {
-        return self.pc;
-      }
-    },
-
-    signalingState: {
-      get: function () {
-        return self.pc.signalingState;
-      }
-    },
-
-    iceConnectionState: {
-      get: function () {
-        return self.pc.iceConnectionState;
-      }
-    },
-
-    iceGatheringState: {
-      get: function () {
-        return self.pc.iceGatheringState;
-      }
-    },
-
-    localDescription: {
-      get: function () {
-        return getLocalDescription.call(self);
-      }
-    },
-
-    remoteDescription: {
-      get: function () {
-        return self.pc.remoteDescription;
-      }
-    },
-
-    peerIdentity: {
-      get: function () {
-        return self.pc.peerIdentity;
-      }
-    }
-  });
-}
-
-},{"./Adapter":35,"debug":32,"merge":40}],37:[function(require,module,exports){
-'use strict';
-
-module.exports = rtcninja;
-
-
-// Dependencies.
-
-var browser = require('bowser'),
-  debug = require('debug')('rtcninja'),
-  debugerror = require('debug')('rtcninja:ERROR'),
-  version = require('./version'),
-  Adapter = require('./Adapter'),
-  RTCPeerConnection = require('./RTCPeerConnection'),
-
-  // Internal vars.
-  called = false;
-
-debugerror.log = console.warn.bind(console);
-debug('version %s', version);
-debug('detected browser: %s %s [mobile:%s, tablet:%s, android:%s, ios:%s]',
-    browser.name, browser.version, !!browser.mobile, !!browser.tablet,
-    !!browser.android, !!browser.ios);
-
-
-// Constructor.
-
-function rtcninja(options) {
-  // Load adapter
-  var iface = Adapter(options || {});  // jshint ignore:line
-
-  called = true;
-
-  // Expose RTCPeerConnection class.
-  rtcninja.RTCPeerConnection = RTCPeerConnection;
-
-  // Expose WebRTC API and utils.
-  rtcninja.getUserMedia = iface.getUserMedia;
-  rtcninja.RTCSessionDescription = iface.RTCSessionDescription;
-  rtcninja.RTCIceCandidate = iface.RTCIceCandidate;
-  rtcninja.MediaStreamTrack = iface.MediaStreamTrack;
-  rtcninja.getMediaDevices = iface.getMediaDevices;
-  rtcninja.attachMediaStream = iface.attachMediaStream;
-  rtcninja.closeMediaStream = iface.closeMediaStream;
-  rtcninja.canRenegotiate = iface.canRenegotiate;
-
-  // Log WebRTC support.
-  if (iface.hasWebRTC()) {
-    debug('WebRTC supported');
-    return true;
-  } else {
-    debugerror('WebRTC not supported');
-    return false;
-  }
-}
-
-
-// Public API.
-
-// If called without calling rtcninja(), call it.
-rtcninja.hasWebRTC = function () {
-  if (!called) {
-    rtcninja();
-  }
-
-  return Adapter.hasWebRTC();
-};
-
-
-// Expose version property.
-Object.defineProperty(rtcninja, 'version', {
-  get: function () {
-    return version;
-  }
-});
-
-
-// Expose called property.
-Object.defineProperty(rtcninja, 'called', {
-  get: function () {
-    return called;
-  }
-});
-
-
-// Exposing stuff.
-
-rtcninja.debug = require('debug');
-rtcninja.browser = browser;
-
-},{"./Adapter":35,"./RTCPeerConnection":36,"./version":38,"bowser":39,"debug":32}],38:[function(require,module,exports){
-'use strict';
-
-// Expose the 'version' field of package.json.
-module.exports = require('../package.json').version;
-
-
-},{"../package.json":41}],39:[function(require,module,exports){
-/*!
-  * Bowser - a browser detector
-  * https://github.com/ded/bowser
-  * MIT License | (c) Dustin Diaz 2015
-  */
-
-!function (name, definition) {
-  if (typeof module != 'undefined' && module.exports) module.exports = definition()
-  else if (typeof define == 'function' && define.amd) define(definition)
-  else this[name] = definition()
-}('bowser', function () {
-  /**
-    * See useragents.js for examples of navigator.userAgent
-    */
-
-  var t = true
-
-  function detect(ua) {
-
-    function getFirstMatch(regex) {
-      var match = ua.match(regex);
-      return (match && match.length > 1 && match[1]) || '';
-    }
-
-    function getSecondMatch(regex) {
-      var match = ua.match(regex);
-      return (match && match.length > 1 && match[2]) || '';
-    }
-
-    var iosdevice = getFirstMatch(/(ipod|iphone|ipad)/i).toLowerCase()
-      , likeAndroid = /like android/i.test(ua)
-      , android = !likeAndroid && /android/i.test(ua)
-      , chromeBook = /CrOS/.test(ua)
-      , edgeVersion = getFirstMatch(/edge\/(\d+(\.\d+)?)/i)
-      , versionIdentifier = getFirstMatch(/version\/(\d+(\.\d+)?)/i)
-      , tablet = /tablet/i.test(ua)
-      , mobile = !tablet && /[^-]mobi/i.test(ua)
-      , result
-
-    if (/opera|opr/i.test(ua)) {
-      result = {
-        name: 'Opera'
-      , opera: t
-      , version: versionIdentifier || getFirstMatch(/(?:opera|opr)[\s\/](\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/yabrowser/i.test(ua)) {
-      result = {
-        name: 'Yandex Browser'
-      , yandexbrowser: t
-      , version: versionIdentifier || getFirstMatch(/(?:yabrowser)[\s\/](\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/windows phone/i.test(ua)) {
-      result = {
-        name: 'Windows Phone'
-      , windowsphone: t
-      }
-      if (edgeVersion) {
-        result.msedge = t
-        result.version = edgeVersion
-      }
-      else {
-        result.msie = t
-        result.version = getFirstMatch(/iemobile\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/msie|trident/i.test(ua)) {
-      result = {
-        name: 'Internet Explorer'
-      , msie: t
-      , version: getFirstMatch(/(?:msie |rv:)(\d+(\.\d+)?)/i)
-      }
-    } else if (chromeBook) {
-      result = {
-        name: 'Chrome'
-      , chromeBook: t
-      , chrome: t
-      , version: getFirstMatch(/(?:chrome|crios|crmo)\/(\d+(\.\d+)?)/i)
-      }
-    } else if (/chrome.+? edge/i.test(ua)) {
-      result = {
-        name: 'Microsoft Edge'
-      , msedge: t
-      , version: edgeVersion
-      }
-    }
-    else if (/chrome|crios|crmo/i.test(ua)) {
-      result = {
-        name: 'Chrome'
-      , chrome: t
-      , version: getFirstMatch(/(?:chrome|crios|crmo)\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (iosdevice) {
-      result = {
-        name : iosdevice == 'iphone' ? 'iPhone' : iosdevice == 'ipad' ? 'iPad' : 'iPod'
-      }
-      // WTF: version is not part of user agent in web apps
-      if (versionIdentifier) {
-        result.version = versionIdentifier
-      }
-    }
-    else if (/sailfish/i.test(ua)) {
-      result = {
-        name: 'Sailfish'
-      , sailfish: t
-      , version: getFirstMatch(/sailfish\s?browser\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/seamonkey\//i.test(ua)) {
-      result = {
-        name: 'SeaMonkey'
-      , seamonkey: t
-      , version: getFirstMatch(/seamonkey\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/firefox|iceweasel/i.test(ua)) {
-      result = {
-        name: 'Firefox'
-      , firefox: t
-      , version: getFirstMatch(/(?:firefox|iceweasel)[ \/](\d+(\.\d+)?)/i)
-      }
-      if (/\((mobile|tablet);[^\)]*rv:[\d\.]+\)/i.test(ua)) {
-        result.firefoxos = t
-      }
-    }
-    else if (/silk/i.test(ua)) {
-      result =  {
-        name: 'Amazon Silk'
-      , silk: t
-      , version : getFirstMatch(/silk\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (android) {
-      result = {
-        name: 'Android'
-      , version: versionIdentifier
-      }
-    }
-    else if (/phantom/i.test(ua)) {
-      result = {
-        name: 'PhantomJS'
-      , phantom: t
-      , version: getFirstMatch(/phantomjs\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/blackberry|\bbb\d+/i.test(ua) || /rim\stablet/i.test(ua)) {
-      result = {
-        name: 'BlackBerry'
-      , blackberry: t
-      , version: versionIdentifier || getFirstMatch(/blackberry[\d]+\/(\d+(\.\d+)?)/i)
-      }
-    }
-    else if (/(web|hpw)os/i.test(ua)) {
-      result = {
-        name: 'WebOS'
-      , webos: t
-      , version: versionIdentifier || getFirstMatch(/w(?:eb)?osbrowser\/(\d+(\.\d+)?)/i)
-      };
-      /touchpad\//i.test(ua) && (result.touchpad = t)
-    }
-    else if (/bada/i.test(ua)) {
-      result = {
-        name: 'Bada'
-      , bada: t
-      , version: getFirstMatch(/dolfin\/(\d+(\.\d+)?)/i)
-      };
-    }
-    else if (/tizen/i.test(ua)) {
-      result = {
-        name: 'Tizen'
-      , tizen: t
-      , version: getFirstMatch(/(?:tizen\s?)?browser\/(\d+(\.\d+)?)/i) || versionIdentifier
-      };
-    }
-    else if (/safari/i.test(ua)) {
-      result = {
-        name: 'Safari'
-      , safari: t
-      , version: versionIdentifier
-      }
-    }
-    else {
-      result = {
-        name: getFirstMatch(/^(.*)\/(.*) /),
-        version: getSecondMatch(/^(.*)\/(.*) /)
-     };
-   }
-
-    // set webkit or gecko flag for browsers based on these engines
-    if (!result.msedge && /(apple)?webkit/i.test(ua)) {
-      result.name = result.name || "Webkit"
-      result.webkit = t
-      if (!result.version && versionIdentifier) {
-        result.version = versionIdentifier
-      }
-    } else if (!result.opera && /gecko\//i.test(ua)) {
-      result.name = result.name || "Gecko"
-      result.gecko = t
-      result.version = result.version || getFirstMatch(/gecko\/(\d+(\.\d+)?)/i)
-    }
-
-    // set OS flags for platforms that have multiple browsers
-    if (!result.msedge && (android || result.silk)) {
-      result.android = t
-    } else if (iosdevice) {
-      result[iosdevice] = t
-      result.ios = t
-    }
-
-    // OS version extraction
-    var osVersion = '';
-    if (result.windowsphone) {
-      osVersion = getFirstMatch(/windows phone (?:os)?\s?(\d+(\.\d+)*)/i);
-    } else if (iosdevice) {
-      osVersion = getFirstMatch(/os (\d+([_\s]\d+)*) like mac os x/i);
-      osVersion = osVersion.replace(/[_\s]/g, '.');
-    } else if (android) {
-      osVersion = getFirstMatch(/android[ \/-](\d+(\.\d+)*)/i);
-    } else if (result.webos) {
-      osVersion = getFirstMatch(/(?:web|hpw)os\/(\d+(\.\d+)*)/i);
-    } else if (result.blackberry) {
-      osVersion = getFirstMatch(/rim\stablet\sos\s(\d+(\.\d+)*)/i);
-    } else if (result.bada) {
-      osVersion = getFirstMatch(/bada\/(\d+(\.\d+)*)/i);
-    } else if (result.tizen) {
-      osVersion = getFirstMatch(/tizen[\/\s](\d+(\.\d+)*)/i);
-    }
-    if (osVersion) {
-      result.osversion = osVersion;
-    }
-
-    // device type extraction
-    var osMajorVersion = osVersion.split('.')[0];
-    if (tablet || iosdevice == 'ipad' || (android && (osMajorVersion == 3 || (osMajorVersion == 4 && !mobile))) || result.silk) {
-      result.tablet = t
-    } else if (mobile || iosdevice == 'iphone' || iosdevice == 'ipod' || android || result.blackberry || result.webos || result.bada) {
-      result.mobile = t
-    }
-
-    // Graded Browser Support
-    // http://developer.yahoo.com/yui/articles/gbs
-    if (result.msedge ||
-        (result.msie && result.version >= 10) ||
-        (result.yandexbrowser && result.version >= 15) ||
-        (result.chrome && result.version >= 20) ||
-        (result.firefox && result.version >= 20.0) ||
-        (result.safari && result.version >= 6) ||
-        (result.opera && result.version >= 10.0) ||
-        (result.ios && result.osversion && result.osversion.split(".")[0] >= 6) ||
-        (result.blackberry && result.version >= 10.1)
-        ) {
-      result.a = t;
-    }
-    else if ((result.msie && result.version < 10) ||
-        (result.chrome && result.version < 20) ||
-        (result.firefox && result.version < 20.0) ||
-        (result.safari && result.version < 6) ||
-        (result.opera && result.version < 10.0) ||
-        (result.ios && result.osversion && result.osversion.split(".")[0] < 6)
-        ) {
-      result.c = t
-    } else result.x = t
-
-    return result
-  }
-
-  var bowser = detect(typeof navigator !== 'undefined' ? navigator.userAgent : '')
-
-  bowser.test = function (browserList) {
-    for (var i = 0; i < browserList.length; ++i) {
-      var browserItem = browserList[i];
-      if (typeof browserItem=== 'string') {
-        if (browserItem in bowser) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  /*
-   * Set our detect method to the main bowser object so we can
-   * reuse it to test other user agents.
-   * This is needed to implement future tests.
-   */
-  bowser._detect = detect;
-
-  return bowser
-});
-
-},{}],40:[function(require,module,exports){
-/*!
- * @name JavaScript/NodeJS Merge v1.2.0
- * @author yeikos
- * @repository https://github.com/yeikos/js.merge
-
- * Copyright 2014 yeikos - MIT license
- * https://raw.github.com/yeikos/js.merge/master/LICENSE
- */
-
-;(function(isNode) {
-
-  /**
-   * Merge one or more objects
-   * @param bool? clone
-   * @param mixed,... arguments
-   * @return object
-   */
-
-  var Public = function(clone) {
-
-    return merge(clone === true, false, arguments);
-
-  }, publicName = 'merge';
-
-  /**
-   * Merge two or more objects recursively
-   * @param bool? clone
-   * @param mixed,... arguments
-   * @return object
-   */
-
-  Public.recursive = function(clone) {
-
-    return merge(clone === true, true, arguments);
-
-  };
-
-  /**
-   * Clone the input removing any reference
-   * @param mixed input
-   * @return mixed
-   */
-
-  Public.clone = function(input) {
-
-    var output = input,
-      type = typeOf(input),
-      index, size;
-
-    if (type === 'array') {
-
-      output = [];
-      size = input.length;
-
-      for (index=0;index<size;++index)
-
-        output[index] = Public.clone(input[index]);
-
-    } else if (type === 'object') {
-
-      output = {};
-
-      for (index in input)
-
-        output[index] = Public.clone(input[index]);
-
-    }
-
-    return output;
-
-  };
-
-  /**
-   * Merge two objects recursively
-   * @param mixed input
-   * @param mixed extend
-   * @return mixed
-   */
-
-  function merge_recursive(base, extend) {
-
-    if (typeOf(base) !== 'object')
-
-      return extend;
-
-    for (var key in extend) {
-
-      if (typeOf(base[key]) === 'object' && typeOf(extend[key]) === 'object') {
-
-        base[key] = merge_recursive(base[key], extend[key]);
-
-      } else {
-
-        base[key] = extend[key];
-
-      }
-
-    }
-
-    return base;
-
-  }
-
-  /**
-   * Merge two or more objects
-   * @param bool clone
-   * @param bool recursive
-   * @param array argv
-   * @return object
-   */
-
-  function merge(clone, recursive, argv) {
-
-    var result = argv[0],
-      size = argv.length;
-
-    if (clone || typeOf(result) !== 'object')
-
-      result = {};
-
-    for (var index=0;index<size;++index) {
-
-      var item = argv[index],
-
-        type = typeOf(item);
-
-      if (type !== 'object') continue;
-
-      for (var key in item) {
-
-        var sitem = clone ? Public.clone(item[key]) : item[key];
-
-        if (recursive) {
-
-          result[key] = merge_recursive(result[key], sitem);
-
-        } else {
-
-          result[key] = sitem;
-
-        }
-
-      }
-
-    }
-
-    return result;
-
-  }
-
-  /**
-   * Get type of variable
-   * @param mixed input
-   * @return string
-   *
-   * @see http://jsperf.com/typeofvar
-   */
-
-  function typeOf(input) {
-
-    return ({}).toString.call(input).slice(8, -1).toLowerCase();
-
-  }
-
-  if (isNode) {
-
-    module.exports = Public;
-
-  } else {
-
-    window[publicName] = Public;
-
-  }
-
-})(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],41:[function(require,module,exports){
-module.exports={
-  "name": "rtcninja",
-  "version": "0.6.4",
-  "description": "WebRTC API wrapper to deal with different browsers",
-  "author": {
-    "name": "Iñaki Baz Castillo",
-    "email": "inaki.baz@eface2face.com",
-    "url": "http://eface2face.com"
-  },
-  "contributors": [
-    {
-      "name": "Jesús Pérez",
-      "email": "jesus.perez@eface2face.com"
-    }
-  ],
-  "license": "MIT",
-  "main": "lib/rtcninja.js",
-  "homepage": "https://github.com/eface2face/rtcninja.js",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/eface2face/rtcninja.js.git"
-  },
-  "keywords": [
-    "webrtc"
-  ],
-  "engines": {
-    "node": ">=0.10.32"
-  },
-  "dependencies": {
-    "bowser": "^1.0.0",
-    "debug": "^2.2.0",
-    "merge": "^1.2.0"
-  },
-  "devDependencies": {
-    "browserify": "^11.0.1",
-    "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
-    "gulp-expect-file": "0.0.7",
-    "gulp-filelog": "^0.4.1",
-    "gulp-header": "^1.7.1",
-    "gulp-jscs": "^2.0.0",
-    "gulp-jscs-stylish": "^1.1.2",
-    "gulp-jshint": "^1.11.2",
-    "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.4.0",
-    "jshint-stylish": "^2.0.1",
-    "retire": "^1.1.1",
-    "shelljs": "^0.5.3",
-    "vinyl-source-stream": "^1.1.0"
-  },
-  "gitHead": "18789cbefdb5a6c6c038ab4f1ce8e9e3813135b0",
-  "bugs": {
-    "url": "https://github.com/eface2face/rtcninja.js/issues"
-  },
-  "_id": "rtcninja@0.6.4",
-  "scripts": {},
-  "_shasum": "7ede8577ce978cb431772d877967c53aadeb5e99",
-  "_from": "rtcninja@^0.6.4",
-  "_npmVersion": "2.5.1",
-  "_nodeVersion": "0.12.0",
-  "_npmUser": {
-    "name": "ibc",
-    "email": "ibc@aliax.net"
-  },
-  "dist": {
-    "shasum": "7ede8577ce978cb431772d877967c53aadeb5e99",
-    "tarball": "http://registry.npmjs.org/rtcninja/-/rtcninja-0.6.4.tgz"
-  },
-  "maintainers": [
-    {
-      "name": "ibc",
-      "email": "ibc@aliax.net"
-    }
-  ],
-  "directories": {},
-  "_resolved": "https://registry.npmjs.org/rtcninja/-/rtcninja-0.6.4.tgz",
-  "readme": "ERROR: No README data found!"
-}
-
-},{}],42:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 var grammar = module.exports = {
   v: [{
       name: 'version',
@@ -24761,7 +23030,7 @@ var grammar = module.exports = {
   a: [
     { //a=rtpmap:110 opus/48000/2
       push: 'rtp',
-      reg: /^rtpmap:(\d*) ([\w\-]*)(?:\s*\/(\d*)(?:\s*\/(\S*))?)?/,
+      reg: /^rtpmap:(\d*) ([\w\-\.]*)(?:\s*\/(\d*)(?:\s*\/(\S*))?)?/,
       names: ['payload', 'codec', 'rate', 'encoding'],
       format: function (o) {
         return (o.encoding) ?
@@ -24886,15 +23155,18 @@ var grammar = module.exports = {
       //a=candidate:1162875081 1 udp 2113937151 192.168.34.75 60017 typ host generation 0
       //a=candidate:3289912957 2 udp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 generation 0
       //a=candidate:229815620 1 tcp 1518280447 192.168.150.19 60017 typ host tcptype active generation 0
+      //a=candidate:3289912957 2 tcp 1845501695 193.84.77.194 60017 typ srflx raddr 192.168.34.75 rport 60017 tcptype passive generation 0
       push:'candidates',
-      reg: /^candidate:(\S*) (\d*) (\S*) (\d*) (\S*) (\d*) typ (\S*)(?: tcptype (\S*))?(?: raddr (\S*) rport (\d*))?(?: generation (\d*))?/,
-      names: ['foundation', 'component', 'transport', 'priority', 'ip', 'port', 'type', 'tcptype', 'raddr', 'rport', 'generation'],
+      reg: /^candidate:(\S*) (\d*) (\S*) (\d*) (\S*) (\d*) typ (\S*)(?: raddr (\S*) rport (\d*))?(?: tcptype (\S*))?(?: generation (\d*))?/,
+      names: ['foundation', 'component', 'transport', 'priority', 'ip', 'port', 'type', 'raddr', 'rport', 'tcptype', 'generation'],
       format: function (o) {
         var str = "candidate:%s %d %s %d %s %d typ %s";
+
+        str += (o.raddr != null) ? " raddr %s rport %d" : "%v%v";
+
         // NB: candidate has three optional chunks, so %void middles one if it's missing
         str += (o.tcptype != null) ? " tcptype %s" : "%v";
 
-        str += (o.raddr != null) ? " raddr %s rport %d" : "%v%v";
         if (o.generation != null) {
           str += " generation %d";
         }
@@ -24947,6 +23219,16 @@ var grammar = module.exports = {
       name: 'rtcpRsize',
       reg: /^(rtcp-rsize)/
     },
+    { //a=sctpmap:5000 webrtc-datachannel 1024
+      name: 'sctpmap',
+      reg: /^sctpmap:([\w_\/]*) (\S*)(?: (\S*))?/,
+      names: ['sctpmapNumber', 'app', 'maxMessageSize'],
+      format: function (o) {
+        return (o.maxMessageSize != null) ?
+          "sctpmap:%s %s %s" :
+          "sctpmap:%s %s";
+      }
+    },
     { // any a= that we don't understand is kepts verbatim on media.invalid
       push: 'invalid',
       names: ["value"]
@@ -24967,7 +23249,7 @@ Object.keys(grammar).forEach(function (key) {
   });
 });
 
-},{}],43:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 var parser = require('./parser');
 var writer = require('./writer');
 
@@ -24977,7 +23259,7 @@ exports.parseFmtpConfig = parser.parseFmtpConfig;
 exports.parsePayloads = parser.parsePayloads;
 exports.parseRemoteCandidates = parser.parseRemoteCandidates;
 
-},{"./parser":44,"./writer":45}],44:[function(require,module,exports){
+},{"./parser":38,"./writer":39}],38:[function(require,module,exports){
 var toIntIfInt = function (v) {
   return String(Number(v)) === v ? Number(v) : v;
 };
@@ -25044,7 +23326,7 @@ exports.parse = function (sdp) {
 };
 
 var fmtpReducer = function (acc, expr) {
-  var s = expr.split('=');
+  var s = expr.split(/=(.+)/, 2);
   if (s.length === 2) {
     acc[s[0]] = toIntIfInt(s[1]);
   }
@@ -25072,7 +23354,7 @@ exports.parseRemoteCandidates = function (str) {
   return candidates;
 };
 
-},{"./grammar":42}],45:[function(require,module,exports){
+},{"./grammar":36}],39:[function(require,module,exports){
 var grammar = require('./grammar');
 
 // customized util.format - discards excess arguments and can void middle ones
@@ -25188,145 +23470,12 @@ module.exports = function (session, opts) {
   return sdp.join('\r\n') + '\r\n';
 };
 
-},{"./grammar":42}],46:[function(require,module,exports){
-var _global = (function() { return this; })();
-var nativeWebSocket = _global.WebSocket || _global.MozWebSocket;
-var websocket_version = require('./version');
-
-
-/**
- * Expose a W3C WebSocket class with just one or two arguments.
- */
-function W3CWebSocket(uri, protocols) {
-  var native_instance;
-
-  if (protocols) {
-    native_instance = new nativeWebSocket(uri, protocols);
-  }
-  else {
-    native_instance = new nativeWebSocket(uri);
-  }
-
-  /**
-   * 'native_instance' is an instance of nativeWebSocket (the browser's WebSocket
-   * class). Since it is an Object it will be returned as it is when creating an
-   * instance of W3CWebSocket via 'new W3CWebSocket()'.
-   *
-   * ECMAScript 5: http://bclary.com/2004/11/07/#a-13.2.2
-   */
-  return native_instance;
-}
-
-
-/**
- * Module exports.
- */
-module.exports = {
-    'w3cwebsocket' : nativeWebSocket ? W3CWebSocket : null,
-    'version'      : websocket_version
-};
-
-},{"./version":47}],47:[function(require,module,exports){
-module.exports = require('../package.json').version;
-
-},{"../package.json":48}],48:[function(require,module,exports){
-module.exports={
-  "name": "websocket",
-  "description": "Websocket Client & Server Library implementing the WebSocket protocol as specified in RFC 6455.",
-  "keywords": [
-    "websocket",
-    "websockets",
-    "socket",
-    "networking",
-    "comet",
-    "push",
-    "RFC-6455",
-    "realtime",
-    "server",
-    "client"
-  ],
-  "author": {
-    "name": "Brian McKelvey",
-    "email": "brian@worlize.com",
-    "url": "https://www.worlize.com/"
-  },
-  "contributors": [
-    {
-      "name": "Iñaki Baz Castillo",
-      "email": "ibc@aliax.net",
-      "url": "http://dev.sipdoc.net"
-    }
-  ],
-  "version": "1.0.22",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/theturtle32/WebSocket-Node.git"
-  },
-  "homepage": "https://github.com/theturtle32/WebSocket-Node",
-  "engines": {
-    "node": ">=0.8.0"
-  },
-  "dependencies": {
-    "debug": "~2.2.0",
-    "nan": "~2.0.5",
-    "typedarray-to-buffer": "~3.0.3",
-    "yaeti": "~0.0.4"
-  },
-  "devDependencies": {
-    "buffer-equal": "^0.0.1",
-    "faucet": "^0.0.1",
-    "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
-    "gulp-jshint": "^1.11.2",
-    "jshint-stylish": "^1.0.2",
-    "tape": "^4.0.1"
-  },
-  "config": {
-    "verbose": false
-  },
-  "scripts": {
-    "install": "(node-gyp rebuild 2> builderror.log) || (exit 0)",
-    "test": "faucet test/unit",
-    "gulp": "gulp"
-  },
-  "main": "index",
-  "directories": {
-    "lib": "./lib"
-  },
-  "browser": "lib/browser.js",
-  "license": "Apache-2.0",
-  "gitHead": "19108bbfd7d94a5cd02dbff3495eafee9e901ca4",
-  "bugs": {
-    "url": "https://github.com/theturtle32/WebSocket-Node/issues"
-  },
-  "_id": "websocket@1.0.22",
-  "_shasum": "8c33e3449f879aaf518297c9744cebf812b9e3d8",
-  "_from": "websocket@^1.0.22",
-  "_npmVersion": "2.14.3",
-  "_nodeVersion": "3.3.1",
-  "_npmUser": {
-    "name": "theturtle32",
-    "email": "brian@worlize.com"
-  },
-  "maintainers": [
-    {
-      "name": "theturtle32",
-      "email": "brian@worlize.com"
-    }
-  ],
-  "dist": {
-    "shasum": "8c33e3449f879aaf518297c9744cebf812b9e3d8",
-    "tarball": "http://registry.npmjs.org/websocket/-/websocket-1.0.22.tgz"
-  },
-  "_resolved": "https://registry.npmjs.org/websocket/-/websocket-1.0.22.tgz",
-  "readme": "ERROR: No README data found!"
-}
-
-},{}],49:[function(require,module,exports){
+},{"./grammar":36}],40:[function(require,module,exports){
 module.exports={
   "name": "jssip",
   "title": "JsSIP",
   "description": "the Javascript SIP library",
-  "version": "0.7.9",
+  "version": "2.0.6",
   "homepage": "http://jssip.net",
   "author": "José Luis Millán <jmillan@aliax.net> (https://github.com/jmillan)",
   "contributors": [
@@ -25352,22 +23501,23 @@ module.exports={
   },
   "dependencies": {
     "debug": "^2.2.0",
-    "rtcninja": "^0.6.4",
-    "sdp-transform": "~1.5.0",
-    "websocket": "^1.0.22"
+    "rtcninja": "^0.7.0",
+    "sdp-transform": "^1.6.2"
   },
   "devDependencies": {
-    "browserify": "^11.2.0",
+    "browserify": "^13.1.0",
     "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
     "gulp-expect-file": "0.0.7",
-    "gulp-header": "^1.7.1",
-    "gulp-jshint": "^1.11.2",
+    "gulp-header": "1.8.8",
+    "gulp-jshint": "^2.0.1",
     "gulp-nodeunit-runner": "^0.2.2",
     "gulp-rename": "^1.2.2",
-    "gulp-uglify": "^1.4.2",
-    "gulp-util": "^3.0.6",
-    "jshint-stylish": "^2.0.1",
+    "gulp-uglify": "^2.0.0",
+    "gulp-util": "^3.0.7",
+    "jshint": "^2.9.3",
+    "jshint-stylish": "^2.2.1",
     "pegjs": "0.7.0",
+    "vinyl-buffer": "^1.0.0",
     "vinyl-source-stream": "^1.1.0"
   },
   "scripts": {
@@ -25375,5 +23525,4551 @@ module.exports={
   }
 }
 
+},{}],41:[function(require,module,exports){
+(function (global){
+'use strict';
+
+// Expose the Adapter function/object.
+module.exports = Adapter;
+
+
+// Dependencies
+
+var browser = require('bowser'),
+	debug = require('debug')('rtcninja:Adapter'),
+	debugerror = require('debug')('rtcninja:ERROR:Adapter'),
+
+	// Internal vars
+	getUserMedia = null,
+	mediaDevices = null,
+	RTCPeerConnection = null,
+	RTCSessionDescription = null,
+	RTCIceCandidate = null,
+	MediaStreamTrack = null,
+	getMediaDevices = null,
+	attachMediaStream = null,
+	canRenegotiate = false,
+	oldSpecRTCOfferOptions = false,
+	browserVersion = Number(browser.version) || 0,
+	isDesktop = !!(!browser.mobile && (!browser.tablet || (browser.msie && browserVersion >= 10))),
+	hasWebRTC = false,
+	// Dirty trick to get this library working in a Node-webkit env with browserified libs
+	virtGlobal = global.window || global,
+	// Don't fail in Node
+	virtNavigator = virtGlobal.navigator || {};
+
+debugerror.log = console.warn.bind(console);
+
+
+// Constructor.
+
+function Adapter(options) {
+	// Chrome desktop, Chrome Android, Opera desktop, Opera Android, Android native browser
+	// or generic Webkit browser.
+	if (
+		(isDesktop && browser.chrome && browserVersion >= 32) ||
+		(browser.android && browser.chrome && browserVersion >= 39) ||
+		(isDesktop && browser.opera && browserVersion >= 27) ||
+		(browser.android && browser.opera && browserVersion >= 24) ||
+		(browser.android && browser.webkit && !browser.chrome && browserVersion >= 37) ||
+		(virtNavigator.webkitGetUserMedia && virtGlobal.webkitRTCPeerConnection)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.webkitGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.webkitRTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = true;
+		oldSpecRTCOfferOptions = false;
+	// Old Firefox desktop, old Firefox Android.
+	} else if (
+		(browser.firefox && browserVersion < 47) ||
+		(virtNavigator.mozGetUserMedia && virtGlobal.mozRTCPeerConnection)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.mozRTCPeerConnection;
+		RTCSessionDescription = virtGlobal.mozRTCSessionDescription;
+		RTCIceCandidate = virtGlobal.mozRTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = false;
+		oldSpecRTCOfferOptions = false;
+	// Modern Firefox desktop, modern Firefox Android.
+	} else if (
+		((browser.firefox || browser.gecko) && browserVersion >= 47)
+	) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.mozGetUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.RTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		attachMediaStream = function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = false;
+		oldSpecRTCOfferOptions = false;
+		// WebRTC plugin required. For example IE or Safari with the Temasys plugin.
+	} else if (
+		options.plugin &&
+		typeof options.plugin.isRequired === 'function' &&
+		options.plugin.isRequired() &&
+		typeof options.plugin.isInstalled === 'function' &&
+		options.plugin.isInstalled()
+	) {
+		var pluginiface = options.plugin.interface;
+
+		hasWebRTC = true;
+		getUserMedia = pluginiface.getUserMedia;
+		mediaDevices = pluginiface.mediaDevices;
+		RTCPeerConnection = pluginiface.RTCPeerConnection;
+		RTCSessionDescription = pluginiface.RTCSessionDescription;
+		RTCIceCandidate = pluginiface.RTCIceCandidate;
+		MediaStreamTrack = pluginiface.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = pluginiface.attachMediaStream;
+		canRenegotiate = pluginiface.canRenegotiate;
+		oldSpecRTCOfferOptions = true;
+	// Best effort (may be adater.js is loaded).
+	} else if (virtNavigator.getUserMedia && virtGlobal.RTCPeerConnection) {
+		hasWebRTC = true;
+		getUserMedia = virtNavigator.getUserMedia.bind(virtNavigator);
+		mediaDevices = virtNavigator.mediaDevices;
+		RTCPeerConnection = virtGlobal.RTCPeerConnection;
+		RTCSessionDescription = virtGlobal.RTCSessionDescription;
+		RTCIceCandidate = virtGlobal.RTCIceCandidate;
+		MediaStreamTrack = virtGlobal.MediaStreamTrack;
+		if (MediaStreamTrack && MediaStreamTrack.getSources) {
+			getMediaDevices = MediaStreamTrack.getSources.bind(MediaStreamTrack);
+		} else if (virtNavigator.getMediaDevices) {
+			getMediaDevices = virtNavigator.getMediaDevices.bind(virtNavigator);
+		}
+		attachMediaStream = virtGlobal.attachMediaStream || function (element, stream) {
+			element.src = URL.createObjectURL(stream);
+			return element;
+		};
+		canRenegotiate = true;
+		oldSpecRTCOfferOptions = false;
+	}
+
+
+	function throwNonSupported(item) {
+		return function () {
+			throw new Error('rtcninja: WebRTC not supported, missing ' + item +
+			' [browser: ' + browser.name + ' ' + browser.version + ']');
+		};
+	}
+
+
+	// Public API.
+
+	// Expose a WebRTC checker.
+	Adapter.hasWebRTC = function () {
+		return hasWebRTC;
+	};
+
+	// Expose getUserMedia.
+	if (getUserMedia) {
+		Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
+			debug('getUserMedia() | constraints: %o', constraints);
+
+			try {
+				getUserMedia(constraints,
+					function (stream) {
+						debug('getUserMedia() | success');
+						if (successCallback) {
+							successCallback(stream);
+						}
+					},
+					function (error) {
+						debug('getUserMedia() | error:', error);
+						if (errorCallback) {
+							errorCallback(error);
+						}
+					}
+				);
+			}
+			catch (error) {
+				debugerror('getUserMedia() | error:', error);
+				if (errorCallback) {
+					errorCallback(error);
+				}
+			}
+		};
+	} else {
+		Adapter.getUserMedia = function (constraints, successCallback, errorCallback) {
+			debugerror('getUserMedia() | WebRTC not supported');
+			if (errorCallback) {
+				errorCallback(new Error('rtcninja: WebRTC not supported, missing ' +
+				'getUserMedia [browser: ' + browser.name + ' ' + browser.version + ']'));
+			} else {
+				throwNonSupported('getUserMedia');
+			}
+		};
+	}
+
+	// Expose mediaDevices.
+	Adapter.mediaDevices = mediaDevices;
+
+	// Expose RTCPeerConnection.
+	Adapter.RTCPeerConnection = RTCPeerConnection || throwNonSupported('RTCPeerConnection');
+
+	// Expose RTCSessionDescription.
+	Adapter.RTCSessionDescription = RTCSessionDescription || throwNonSupported('RTCSessionDescription');
+
+	// Expose RTCIceCandidate.
+	Adapter.RTCIceCandidate = RTCIceCandidate || throwNonSupported('RTCIceCandidate');
+
+	// Expose MediaStreamTrack.
+	Adapter.MediaStreamTrack = MediaStreamTrack || throwNonSupported('MediaStreamTrack');
+
+	// Expose getMediaDevices.
+	Adapter.getMediaDevices = getMediaDevices;
+
+	// Expose MediaStreamTrack.
+	Adapter.attachMediaStream = attachMediaStream || throwNonSupported('attachMediaStream');
+
+	// Expose canRenegotiate attribute.
+	Adapter.canRenegotiate = canRenegotiate;
+
+	// Expose closeMediaStream.
+	Adapter.closeMediaStream = function (stream) {
+		if (!stream) {
+			return;
+		}
+
+		// Latest spec states that MediaStream has no stop() method and instead must
+		// call stop() on every MediaStreamTrack.
+		try {
+			debug('closeMediaStream() | calling stop() on all the MediaStreamTrack');
+
+			var tracks, i, len;
+
+			if (stream.getTracks) {
+				tracks = stream.getTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+			} else {
+				tracks = stream.getAudioTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+				tracks = stream.getVideoTracks();
+				for (i = 0, len = tracks.length; i < len; i += 1) {
+					tracks[i].stop();
+				}
+			}
+		} catch (error) {
+			// Deprecated by the spec, but still in use.
+			// NOTE: In Temasys IE plugin stream.stop is a callable 'object'.
+			if (typeof stream.stop === 'function' || typeof stream.stop === 'object') {
+				debug('closeMediaStream() | calling stop() on the MediaStream');
+
+				stream.stop();
+			}
+		}
+	};
+
+	// Expose fixPeerConnectionConfig.
+	Adapter.fixPeerConnectionConfig = function (pcConfig) {
+		var i, len, iceServer, hasUrls, hasUrl;
+
+		if (!Array.isArray(pcConfig.iceServers)) {
+			pcConfig.iceServers = [];
+		}
+
+		for (i = 0, len = pcConfig.iceServers.length; i < len; i += 1) {
+			iceServer = pcConfig.iceServers[i];
+			hasUrls = iceServer.hasOwnProperty('urls');
+			hasUrl = iceServer.hasOwnProperty('url');
+
+			if (typeof iceServer === 'object') {
+				// Has .urls but not .url, so add .url with a single string value.
+				if (hasUrls && !hasUrl) {
+					iceServer.url = (Array.isArray(iceServer.urls) ? iceServer.urls[0] : iceServer.urls);
+				// Has .url but not .urls, so add .urls with same value.
+				} else if (!hasUrls && hasUrl) {
+					iceServer.urls = (Array.isArray(iceServer.url) ? iceServer.url.slice() : iceServer.url);
+				}
+
+				// Ensure .url is a single string.
+				if (hasUrl && Array.isArray(iceServer.url)) {
+					iceServer.url = iceServer.url[0];
+				}
+			}
+		}
+	};
+
+	// Expose fixRTCOfferOptions.
+	Adapter.fixRTCOfferOptions = function (options) {
+		options = options || {};
+
+		// New spec.
+		if (!oldSpecRTCOfferOptions) {
+			if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveAudio')) {
+				options.offerToReceiveAudio = options.mandatory.OfferToReceiveAudio ? 1 : 0;
+			}
+			if (options.mandatory && options.mandatory.hasOwnProperty('OfferToReceiveVideo')) {
+				options.offerToReceiveVideo = options.mandatory.OfferToReceiveVideo ? 1 : 0;
+			}
+			delete options.mandatory;
+		// Old spec.
+		} else {
+			if (options.hasOwnProperty('offerToReceiveAudio')) {
+				options.mandatory = options.mandatory || {};
+				options.mandatory.OfferToReceiveAudio = options.offerToReceiveAudio ? true : false;
+			}
+			if (options.hasOwnProperty('offerToReceiveVideo')) {
+				options.mandatory = options.mandatory || {};
+				options.mandatory.OfferToReceiveVideo = options.offerToReceiveVideo ? true : false;
+			}
+		}
+	};
+
+	return Adapter;
+}
+
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"bowser":45,"debug":46}],42:[function(require,module,exports){
+'use strict';
+
+// Expose the RTCPeerConnection class.
+module.exports = RTCPeerConnection;
+
+
+// Dependencies.
+
+var merge = require('merge'),
+	debug = require('debug')('rtcninja:RTCPeerConnection'),
+	debugerror = require('debug')('rtcninja:ERROR:RTCPeerConnection'),
+	Adapter = require('./Adapter'),
+
+	// Internal constants.
+	C = {
+		REGEXP_NORMALIZED_CANDIDATE: new RegExp(/^candidate:/i),
+		REGEXP_FIX_CANDIDATE: new RegExp(/(^a=|\r|\n)/gi),
+		REGEXP_RELAY_CANDIDATE: new RegExp(/ relay /i),
+		REGEXP_SDP_CANDIDATES: new RegExp(/^a=candidate:.*\r\n/igm),
+		REGEXP_SDP_NON_RELAY_CANDIDATES: new RegExp(/^a=candidate:(.(?!relay ))*\r\n/igm)
+	},
+
+	// Internal variables.
+	VAR = {
+		normalizeCandidate: null
+	};
+
+debugerror.log = console.warn.bind(console);
+
+
+// Constructor
+
+function RTCPeerConnection(pcConfig, pcConstraints) {
+	debug('new | [pcConfig:%o, pcConstraints:%o]', pcConfig, pcConstraints);
+
+	// Set this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
+
+	// NOTE: Deprecated pcConstraints argument.
+	this.pcConstraints = pcConstraints;
+
+	// Own version of the localDescription.
+	this.ourLocalDescription = null;
+
+	// Latest values of PC attributes to avoid events with same value.
+	this.ourSignalingState = null;
+	this.ourIceConnectionState = null;
+	this.ourIceGatheringState = null;
+
+	// Timer for options.gatheringTimeout.
+	this.timerGatheringTimeout = null;
+
+	// Timer for options.gatheringTimeoutAfterRelay.
+	this.timerGatheringTimeoutAfterRelay = null;
+
+	// Flag to ignore new gathered ICE candidates.
+	this.ignoreIceGathering = false;
+
+	// Flag set when closed.
+	this.closed = false;
+
+	// Set RTCPeerConnection.
+	setPeerConnection.call(this);
+
+	// Set properties.
+	setProperties.call(this);
+}
+
+
+// Public API.
+
+RTCPeerConnection.prototype.createOffer = function (successCallback, failureCallback, options) {
+	debug('createOffer()');
+
+	var self = this;
+
+	Adapter.fixRTCOfferOptions(options);
+
+	this.pc.createOffer(
+		function (offer) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('createOffer() | success');
+			if (successCallback) {
+				successCallback(offer);
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('createOffer() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		},
+		options
+	);
+};
+
+
+RTCPeerConnection.prototype.createAnswer = function (successCallback, failureCallback, options) {
+	debug('createAnswer()');
+
+	var self = this;
+
+	this.pc.createAnswer(
+		function (answer) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('createAnswer() | success');
+			if (successCallback) {
+				successCallback(answer);
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('createAnswer() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		},
+		options
+	);
+};
+
+
+RTCPeerConnection.prototype.setLocalDescription = function (description, successCallback, failureCallback) {
+	debug('setLocalDescription()');
+
+	var self = this;
+
+	this.pc.setLocalDescription(
+		description,
+		// success.
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('setLocalDescription() | success');
+
+			// Clear gathering timers.
+			clearTimeout(self.timerGatheringTimeout);
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
+
+			runTimerGatheringTimeout();
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		// failure
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('setLocalDescription() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
+
+	// Enable (again) ICE gathering.
+	this.ignoreIceGathering = false;
+
+	// Handle gatheringTimeout.
+	function runTimerGatheringTimeout() {
+		if (typeof self.options.gatheringTimeout !== 'number') {
+			return;
+		}
+		// If setLocalDescription was already called, it may happen that
+		// ICE gathering is not needed, so don't run this timer.
+		if (self.pc.iceGatheringState === 'complete') {
+			return;
+		}
+
+		debug('setLocalDescription() | ending gathering in %d ms (gatheringTimeout option)',
+			self.options.gatheringTimeout);
+
+		self.timerGatheringTimeout = setTimeout(function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+
+			debug('forced end of candidates after gatheringTimeout timeout');
+
+			// Clear gathering timers.
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
+
+			// Ignore new candidates.
+			self.ignoreIceGathering = true;
+			if (self.onicecandidate) {
+				self.onicecandidate({ candidate: null }, null);
+			}
+
+		}, self.options.gatheringTimeout);
+	}
+};
+
+
+RTCPeerConnection.prototype.setRemoteDescription = function (description, successCallback, failureCallback) {
+	debug('setRemoteDescription()');
+
+	var self = this;
+
+	this.pc.setRemoteDescription(
+		description,
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('setRemoteDescription() | success');
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('setRemoteDescription() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
+};
+
+
+RTCPeerConnection.prototype.updateIce = function (pcConfig) {
+	debug('updateIce() | pcConfig: %o', pcConfig);
+
+	// Update this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
+
+	this.pc.updateIce(this.pcConfig);
+
+	// Enable (again) ICE gathering.
+	this.ignoreIceGathering = false;
+};
+
+
+RTCPeerConnection.prototype.addIceCandidate = function (candidate, successCallback, failureCallback) {
+	debug('addIceCandidate() | candidate: %o', candidate);
+
+	var self = this;
+
+	this.pc.addIceCandidate(
+		candidate,
+		function () {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debug('addIceCandidate() | success');
+			if (successCallback) {
+				successCallback();
+			}
+		},
+		function (error) {
+			if (isClosed.call(self)) {
+				return;
+			}
+			debugerror('addIceCandidate() | error:', error);
+			if (failureCallback) {
+				failureCallback(error);
+			}
+		}
+	);
+};
+
+
+RTCPeerConnection.prototype.getConfiguration = function () {
+	debug('getConfiguration()');
+
+	return this.pc.getConfiguration();
+};
+
+
+RTCPeerConnection.prototype.getLocalStreams = function () {
+	debug('getLocalStreams()');
+
+	return this.pc.getLocalStreams();
+};
+
+
+RTCPeerConnection.prototype.getRemoteStreams = function () {
+	debug('getRemoteStreams()');
+
+	return this.pc.getRemoteStreams();
+};
+
+
+RTCPeerConnection.prototype.getStreamById = function (streamId) {
+	debug('getStreamById() | streamId: %s', streamId);
+
+	return this.pc.getStreamById(streamId);
+};
+
+
+RTCPeerConnection.prototype.addStream = function (stream) {
+	debug('addStream() | stream: %s', stream);
+
+	this.pc.addStream(stream);
+};
+
+
+RTCPeerConnection.prototype.removeStream = function (stream) {
+	debug('removeStream() | stream: %o', stream);
+
+	this.pc.removeStream(stream);
+};
+
+
+RTCPeerConnection.prototype.close = function () {
+	debug('close()');
+
+	this.closed = true;
+
+	// Clear gathering timers.
+	clearTimeout(this.timerGatheringTimeout);
+	delete this.timerGatheringTimeout;
+	clearTimeout(this.timerGatheringTimeoutAfterRelay);
+	delete this.timerGatheringTimeoutAfterRelay;
+
+	this.pc.close();
+};
+
+
+RTCPeerConnection.prototype.createDataChannel = function () {
+	debug('createDataChannel()');
+
+	return this.pc.createDataChannel.apply(this.pc, arguments);
+};
+
+
+RTCPeerConnection.prototype.createDTMFSender = function (track) {
+	debug('createDTMFSender()');
+
+	if (this.pc.createDTMFSender) {
+		return this.pc.createDTMFSender(track);
+	} else {
+		return null;
+	}
+};
+
+
+RTCPeerConnection.prototype.getStats = function () {
+	debug('getStats()');
+
+	return this.pc.getStats.apply(this.pc, arguments);
+};
+
+
+RTCPeerConnection.prototype.setIdentityProvider = function () {
+	debug('setIdentityProvider()');
+
+	return this.pc.setIdentityProvider.apply(this.pc, arguments);
+};
+
+
+RTCPeerConnection.prototype.getIdentityAssertion = function () {
+	debug('getIdentityAssertion()');
+
+	return this.pc.getIdentityAssertion();
+};
+
+
+RTCPeerConnection.prototype.reset = function (pcConfig) {
+	debug('reset() | pcConfig: %o', pcConfig);
+
+	var pc = this.pc;
+
+	// Remove events in the old PC.
+	pc.onnegotiationneeded = null;
+	pc.onicecandidate = null;
+	pc.onaddstream = null;
+	pc.onremovestream = null;
+	pc.ondatachannel = null;
+	pc.onsignalingstatechange = null;
+	pc.oniceconnectionstatechange = null;
+	pc.onicegatheringstatechange = null;
+	pc.onidentityresult = null;
+	pc.onpeeridentity = null;
+	pc.onidpassertionerror = null;
+	pc.onidpvalidationerror = null;
+
+	// Clear gathering timers.
+	clearTimeout(this.timerGatheringTimeout);
+	delete this.timerGatheringTimeout;
+	clearTimeout(this.timerGatheringTimeoutAfterRelay);
+	delete this.timerGatheringTimeoutAfterRelay;
+
+	// Silently close the old PC.
+	debug('reset() | closing current peerConnection');
+	pc.close();
+
+	// Set this.pcConfig and this.options.
+	setConfigurationAndOptions.call(this, pcConfig);
+
+	// Create a new PC.
+	setPeerConnection.call(this);
+};
+
+
+// Private Helpers.
+
+function setConfigurationAndOptions(pcConfig) {
+	// Clone pcConfig.
+	this.pcConfig = merge(true, pcConfig);
+
+	// Fix pcConfig.
+	Adapter.fixPeerConnectionConfig(this.pcConfig);
+
+	this.options = {
+		iceTransportsRelay: (this.pcConfig.iceTransports === 'relay'),
+		iceTransportsNone: (this.pcConfig.iceTransports === 'none'),
+		gatheringTimeout: this.pcConfig.gatheringTimeout,
+		gatheringTimeoutAfterRelay: this.pcConfig.gatheringTimeoutAfterRelay
+	};
+
+	// Remove custom rtcninja.RTCPeerConnection options from pcConfig.
+	delete this.pcConfig.gatheringTimeout;
+	delete this.pcConfig.gatheringTimeoutAfterRelay;
+
+	debug('setConfigurationAndOptions | processed pcConfig: %o', this.pcConfig);
+}
+
+
+function isClosed() {
+	return ((this.closed) || (this.pc && this.pc.iceConnectionState === 'closed'));
+}
+
+
+function setEvents() {
+	var self = this,
+		pc = this.pc;
+
+	pc.onnegotiationneeded = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onnegotiationneeded()');
+		if (self.onnegotiationneeded) {
+			self.onnegotiationneeded(event);
+		}
+	};
+
+	pc.onicecandidate = function (event) {
+		var candidate, isRelay, newCandidate;
+
+		if (isClosed.call(self)) {
+			return;
+		}
+		if (self.ignoreIceGathering) {
+			return;
+		}
+
+		// Ignore any candidate (event the null one) if iceTransports:'none' is set.
+		if (self.options.iceTransportsNone) {
+			return;
+		}
+
+		candidate = event.candidate;
+
+		if (candidate) {
+			isRelay = C.REGEXP_RELAY_CANDIDATE.test(candidate.candidate);
+
+			// Ignore if just relay candidates are requested.
+			if (self.options.iceTransportsRelay && !isRelay) {
+				return;
+			}
+
+			// Handle gatheringTimeoutAfterRelay.
+			if (isRelay && !self.timerGatheringTimeoutAfterRelay &&
+				(typeof self.options.gatheringTimeoutAfterRelay === 'number')) {
+				debug('onicecandidate() | first relay candidate found, ending gathering in %d ms', self.options.gatheringTimeoutAfterRelay);
+
+				self.timerGatheringTimeoutAfterRelay = setTimeout(function () {
+					if (isClosed.call(self)) {
+						return;
+					}
+
+					debug('forced end of candidates after timeout');
+
+					// Clear gathering timers.
+					delete self.timerGatheringTimeoutAfterRelay;
+					clearTimeout(self.timerGatheringTimeout);
+					delete self.timerGatheringTimeout;
+
+					// Ignore new candidates.
+					self.ignoreIceGathering = true;
+					if (self.onicecandidate) {
+						self.onicecandidate({candidate: null}, null);
+					}
+				}, self.options.gatheringTimeoutAfterRelay);
+			}
+
+			newCandidate = new Adapter.RTCIceCandidate({
+				sdpMid: candidate.sdpMid,
+				sdpMLineIndex: candidate.sdpMLineIndex,
+				candidate: candidate.candidate
+			});
+
+			// Force correct candidate syntax (just check it once).
+			if (VAR.normalizeCandidate === null) {
+				if (C.REGEXP_NORMALIZED_CANDIDATE.test(candidate.candidate)) {
+					VAR.normalizeCandidate = false;
+				} else {
+					debug('onicecandidate() | normalizing ICE candidates syntax (remove "a=" and "\\r\\n")');
+					VAR.normalizeCandidate = true;
+				}
+			}
+			if (VAR.normalizeCandidate) {
+				newCandidate.candidate = candidate.candidate.replace(C.REGEXP_FIX_CANDIDATE, '');
+			}
+
+			debug(
+				'onicecandidate() | m%d(%s) %s',
+				newCandidate.sdpMLineIndex,
+				newCandidate.sdpMid || 'no mid', newCandidate.candidate);
+			if (self.onicecandidate) {
+				self.onicecandidate(event, newCandidate);
+			}
+		// Null candidate (end of candidates).
+		} else {
+			debug('onicecandidate() | end of candidates');
+
+			// Clear gathering timers.
+			clearTimeout(self.timerGatheringTimeout);
+			delete self.timerGatheringTimeout;
+			clearTimeout(self.timerGatheringTimeoutAfterRelay);
+			delete self.timerGatheringTimeoutAfterRelay;
+			if (self.onicecandidate) {
+				self.onicecandidate(event, null);
+			}
+		}
+	};
+
+	pc.onaddstream = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onaddstream() | stream: %o', event.stream);
+		if (self.onaddstream) {
+			self.onaddstream(event, event.stream);
+		}
+	};
+
+	pc.onremovestream = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onremovestream() | stream: %o', event.stream);
+		if (self.onremovestream) {
+			self.onremovestream(event, event.stream);
+		}
+	};
+
+	pc.ondatachannel = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('ondatachannel() | datachannel: %o', event.channel);
+		if (self.ondatachannel) {
+			self.ondatachannel(event, event.channel);
+		}
+	};
+
+	pc.onsignalingstatechange = function (event) {
+		if (pc.signalingState === self.ourSignalingState) {
+			return;
+		}
+
+		debug('onsignalingstatechange() | signalingState: %s', pc.signalingState);
+		self.ourSignalingState = pc.signalingState;
+		if (self.onsignalingstatechange) {
+			self.onsignalingstatechange(event, pc.signalingState);
+		}
+	};
+
+	pc.oniceconnectionstatechange = function (event) {
+		if (pc.iceConnectionState === self.ourIceConnectionState) {
+			return;
+		}
+
+		debug('oniceconnectionstatechange() | iceConnectionState: %s', pc.iceConnectionState);
+		self.ourIceConnectionState = pc.iceConnectionState;
+		if (self.oniceconnectionstatechange) {
+			self.oniceconnectionstatechange(event, pc.iceConnectionState);
+		}
+	};
+
+	pc.onicegatheringstatechange = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		if (pc.iceGatheringState === self.ourIceGatheringState) {
+			return;
+		}
+
+		debug('onicegatheringstatechange() | iceGatheringState: %s', pc.iceGatheringState);
+		self.ourIceGatheringState = pc.iceGatheringState;
+		if (self.onicegatheringstatechange) {
+			self.onicegatheringstatechange(event, pc.iceGatheringState);
+		}
+	};
+
+	pc.onidentityresult = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onidentityresult()');
+		if (self.onidentityresult) {
+			self.onidentityresult(event);
+		}
+	};
+
+	pc.onpeeridentity = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onpeeridentity()');
+		if (self.onpeeridentity) {
+			self.onpeeridentity(event);
+		}
+	};
+
+	pc.onidpassertionerror = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onidpassertionerror()');
+		if (self.onidpassertionerror) {
+			self.onidpassertionerror(event);
+		}
+	};
+
+	pc.onidpvalidationerror = function (event) {
+		if (isClosed.call(self)) {
+			return;
+		}
+
+		debug('onidpvalidationerror()');
+		if (self.onidpvalidationerror) {
+			self.onidpvalidationerror(event);
+		}
+	};
+}
+
+
+function setPeerConnection() {
+	// Create a RTCPeerConnection.
+	if (!this.pcConstraints) {
+		this.pc = new Adapter.RTCPeerConnection(this.pcConfig);
+	} else {
+		// NOTE: Deprecated.
+		this.pc = new Adapter.RTCPeerConnection(this.pcConfig, this.pcConstraints);
+	}
+
+	// Set RTC events.
+	setEvents.call(this);
+}
+
+
+function getLocalDescription() {
+	var pc = this.pc,
+		options = this.options,
+		sdp = null;
+
+	if (!pc.localDescription) {
+		this.ourLocalDescription = null;
+		return null;
+	}
+
+	// Mangle the SDP string.
+	if (options.iceTransportsRelay) {
+		sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_NON_RELAY_CANDIDATES, '');
+	} else if (options.iceTransportsNone) {
+		sdp = pc.localDescription.sdp.replace(C.REGEXP_SDP_CANDIDATES, '');
+	}
+
+	this.ourLocalDescription = new Adapter.RTCSessionDescription({
+		type: pc.localDescription.type,
+		sdp: sdp || pc.localDescription.sdp
+	});
+
+	return this.ourLocalDescription;
+}
+
+
+function setProperties() {
+	var self = this;
+
+	Object.defineProperties(this, {
+		peerConnection: {
+			get: function () {
+				return self.pc;
+			}
+		},
+
+		signalingState: {
+			get: function () {
+				return self.pc.signalingState;
+			}
+		},
+
+		iceConnectionState: {
+			get: function () {
+				return self.pc.iceConnectionState;
+			}
+		},
+
+		iceGatheringState: {
+			get: function () {
+				return self.pc.iceGatheringState;
+			}
+		},
+
+		localDescription: {
+			get: function () {
+				return getLocalDescription.call(self);
+			}
+		},
+
+		remoteDescription: {
+			get: function () {
+				return self.pc.remoteDescription;
+			}
+		},
+
+		peerIdentity: {
+			get: function () {
+				return self.pc.peerIdentity;
+			}
+		}
+	});
+}
+
+},{"./Adapter":41,"debug":46,"merge":49}],43:[function(require,module,exports){
+'use strict';
+
+module.exports = rtcninja;
+
+
+// Dependencies.
+
+var browser = require('bowser'),
+	debug = require('debug')('rtcninja'),
+	debugerror = require('debug')('rtcninja:ERROR'),
+	version = require('./version'),
+	Adapter = require('./Adapter'),
+	RTCPeerConnection = require('./RTCPeerConnection'),
+
+	// Internal vars.
+	called = false;
+
+debugerror.log = console.warn.bind(console);
+debug('version %s', version);
+debug('detected browser: %s %s [mobile:%s, tablet:%s, android:%s, ios:%s]',
+		browser.name, browser.version, !!browser.mobile, !!browser.tablet,
+		!!browser.android, !!browser.ios);
+
+
+// Constructor.
+
+function rtcninja(options) {
+	// Load adapter
+	var iface = Adapter(options || {});  // jshint ignore:line
+
+	called = true;
+
+	// Expose RTCPeerConnection class.
+	rtcninja.RTCPeerConnection = RTCPeerConnection;
+
+	// Expose WebRTC API and utils.
+	rtcninja.getUserMedia = iface.getUserMedia;
+	rtcninja.mediaDevices = iface.mediaDevices;
+	rtcninja.RTCSessionDescription = iface.RTCSessionDescription;
+	rtcninja.RTCIceCandidate = iface.RTCIceCandidate;
+	rtcninja.MediaStreamTrack = iface.MediaStreamTrack;
+	rtcninja.getMediaDevices = iface.getMediaDevices;
+	rtcninja.attachMediaStream = iface.attachMediaStream;
+	rtcninja.closeMediaStream = iface.closeMediaStream;
+	rtcninja.canRenegotiate = iface.canRenegotiate;
+
+	// Log WebRTC support.
+	if (iface.hasWebRTC()) {
+		debug('WebRTC supported');
+		return true;
+	} else {
+		debugerror('WebRTC not supported');
+		return false;
+	}
+}
+
+
+// Public API.
+
+// If called without calling rtcninja(), call it.
+rtcninja.hasWebRTC = function () {
+	if (!called) {
+		rtcninja();
+	}
+
+	return Adapter.hasWebRTC();
+};
+
+
+// Expose version property.
+Object.defineProperty(rtcninja, 'version', {
+	get: function () {
+		return version;
+	}
+});
+
+
+// Expose called property.
+Object.defineProperty(rtcninja, 'called', {
+	get: function () {
+		return called;
+	}
+});
+
+
+// Exposing stuff.
+
+rtcninja.debug = require('debug');
+rtcninja.browser = browser;
+
+},{"./Adapter":41,"./RTCPeerConnection":42,"./version":44,"bowser":45,"debug":46}],44:[function(require,module,exports){
+'use strict';
+
+// Expose the 'version' field of package.json.
+module.exports = require('../package.json').version;
+
+
+},{"../package.json":50}],45:[function(require,module,exports){
+/*!
+ * Bowser - a browser detector
+ * https://github.com/ded/bowser
+ * MIT License | (c) Dustin Diaz 2015
+ */
+
+!function (name, definition) {
+  if (typeof module != 'undefined' && module.exports) module.exports = definition()
+  else if (typeof define == 'function' && define.amd) define(name, definition)
+  else this[name] = definition()
+}('bowser', function () {
+  /**
+    * See useragents.js for examples of navigator.userAgent
+    */
+
+  var t = true
+
+  function detect(ua) {
+
+    function getFirstMatch(regex) {
+      var match = ua.match(regex);
+      return (match && match.length > 1 && match[1]) || '';
+    }
+
+    function getSecondMatch(regex) {
+      var match = ua.match(regex);
+      return (match && match.length > 1 && match[2]) || '';
+    }
+
+    var iosdevice = getFirstMatch(/(ipod|iphone|ipad)/i).toLowerCase()
+      , likeAndroid = /like android/i.test(ua)
+      , android = !likeAndroid && /android/i.test(ua)
+      , nexusMobile = /nexus\s*[0-6]\s*/i.test(ua)
+      , nexusTablet = !nexusMobile && /nexus\s*[0-9]+/i.test(ua)
+      , chromeos = /CrOS/.test(ua)
+      , silk = /silk/i.test(ua)
+      , sailfish = /sailfish/i.test(ua)
+      , tizen = /tizen/i.test(ua)
+      , webos = /(web|hpw)os/i.test(ua)
+      , windowsphone = /windows phone/i.test(ua)
+      , samsungBrowser = /SamsungBrowser/i.test(ua)
+      , windows = !windowsphone && /windows/i.test(ua)
+      , mac = !iosdevice && !silk && /macintosh/i.test(ua)
+      , linux = !android && !sailfish && !tizen && !webos && /linux/i.test(ua)
+      , edgeVersion = getFirstMatch(/edge\/(\d+(\.\d+)?)/i)
+      , versionIdentifier = getFirstMatch(/version\/(\d+(\.\d+)?)/i)
+      , tablet = /tablet/i.test(ua)
+      , mobile = !tablet && /[^-]mobi/i.test(ua)
+      , xbox = /xbox/i.test(ua)
+      , result
+
+    if (/opera/i.test(ua)) {
+      //  an old Opera
+      result = {
+        name: 'Opera'
+      , opera: t
+      , version: versionIdentifier || getFirstMatch(/(?:opera|opr|opios)[\s\/](\d+(\.\d+)?)/i)
+      }
+    } else if (/opr|opios/i.test(ua)) {
+      // a new Opera
+      result = {
+        name: 'Opera'
+        , opera: t
+        , version: getFirstMatch(/(?:opr|opios)[\s\/](\d+(\.\d+)?)/i) || versionIdentifier
+      }
+    }
+    else if (/SamsungBrowser/i.test(ua)) {
+      result = {
+        name: 'Samsung Internet for Android'
+        , samsungBrowser: t
+        , version: versionIdentifier || getFirstMatch(/(?:SamsungBrowser)[\s\/](\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/coast/i.test(ua)) {
+      result = {
+        name: 'Opera Coast'
+        , coast: t
+        , version: versionIdentifier || getFirstMatch(/(?:coast)[\s\/](\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/yabrowser/i.test(ua)) {
+      result = {
+        name: 'Yandex Browser'
+      , yandexbrowser: t
+      , version: versionIdentifier || getFirstMatch(/(?:yabrowser)[\s\/](\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/ucbrowser/i.test(ua)) {
+      result = {
+          name: 'UC Browser'
+        , ucbrowser: t
+        , version: getFirstMatch(/(?:ucbrowser)[\s\/](\d+(?:\.\d+)+)/i)
+      }
+    }
+    else if (/mxios/i.test(ua)) {
+      result = {
+        name: 'Maxthon'
+        , maxthon: t
+        , version: getFirstMatch(/(?:mxios)[\s\/](\d+(?:\.\d+)+)/i)
+      }
+    }
+    else if (/epiphany/i.test(ua)) {
+      result = {
+        name: 'Epiphany'
+        , epiphany: t
+        , version: getFirstMatch(/(?:epiphany)[\s\/](\d+(?:\.\d+)+)/i)
+      }
+    }
+    else if (/puffin/i.test(ua)) {
+      result = {
+        name: 'Puffin'
+        , puffin: t
+        , version: getFirstMatch(/(?:puffin)[\s\/](\d+(?:\.\d+)?)/i)
+      }
+    }
+    else if (/sleipnir/i.test(ua)) {
+      result = {
+        name: 'Sleipnir'
+        , sleipnir: t
+        , version: getFirstMatch(/(?:sleipnir)[\s\/](\d+(?:\.\d+)+)/i)
+      }
+    }
+    else if (/k-meleon/i.test(ua)) {
+      result = {
+        name: 'K-Meleon'
+        , kMeleon: t
+        , version: getFirstMatch(/(?:k-meleon)[\s\/](\d+(?:\.\d+)+)/i)
+      }
+    }
+    else if (windowsphone) {
+      result = {
+        name: 'Windows Phone'
+      , windowsphone: t
+      }
+      if (edgeVersion) {
+        result.msedge = t
+        result.version = edgeVersion
+      }
+      else {
+        result.msie = t
+        result.version = getFirstMatch(/iemobile\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/msie|trident/i.test(ua)) {
+      result = {
+        name: 'Internet Explorer'
+      , msie: t
+      , version: getFirstMatch(/(?:msie |rv:)(\d+(\.\d+)?)/i)
+      }
+    } else if (chromeos) {
+      result = {
+        name: 'Chrome'
+      , chromeos: t
+      , chromeBook: t
+      , chrome: t
+      , version: getFirstMatch(/(?:chrome|crios|crmo)\/(\d+(\.\d+)?)/i)
+      }
+    } else if (/chrome.+? edge/i.test(ua)) {
+      result = {
+        name: 'Microsoft Edge'
+      , msedge: t
+      , version: edgeVersion
+      }
+    }
+    else if (/vivaldi/i.test(ua)) {
+      result = {
+        name: 'Vivaldi'
+        , vivaldi: t
+        , version: getFirstMatch(/vivaldi\/(\d+(\.\d+)?)/i) || versionIdentifier
+      }
+    }
+    else if (sailfish) {
+      result = {
+        name: 'Sailfish'
+      , sailfish: t
+      , version: getFirstMatch(/sailfish\s?browser\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/seamonkey\//i.test(ua)) {
+      result = {
+        name: 'SeaMonkey'
+      , seamonkey: t
+      , version: getFirstMatch(/seamonkey\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/firefox|iceweasel|fxios/i.test(ua)) {
+      result = {
+        name: 'Firefox'
+      , firefox: t
+      , version: getFirstMatch(/(?:firefox|iceweasel|fxios)[ \/](\d+(\.\d+)?)/i)
+      }
+      if (/\((mobile|tablet);[^\)]*rv:[\d\.]+\)/i.test(ua)) {
+        result.firefoxos = t
+      }
+    }
+    else if (silk) {
+      result =  {
+        name: 'Amazon Silk'
+      , silk: t
+      , version : getFirstMatch(/silk\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/phantom/i.test(ua)) {
+      result = {
+        name: 'PhantomJS'
+      , phantom: t
+      , version: getFirstMatch(/phantomjs\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/slimerjs/i.test(ua)) {
+      result = {
+        name: 'SlimerJS'
+        , slimer: t
+        , version: getFirstMatch(/slimerjs\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (/blackberry|\bbb\d+/i.test(ua) || /rim\stablet/i.test(ua)) {
+      result = {
+        name: 'BlackBerry'
+      , blackberry: t
+      , version: versionIdentifier || getFirstMatch(/blackberry[\d]+\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (webos) {
+      result = {
+        name: 'WebOS'
+      , webos: t
+      , version: versionIdentifier || getFirstMatch(/w(?:eb)?osbrowser\/(\d+(\.\d+)?)/i)
+      };
+      /touchpad\//i.test(ua) && (result.touchpad = t)
+    }
+    else if (/bada/i.test(ua)) {
+      result = {
+        name: 'Bada'
+      , bada: t
+      , version: getFirstMatch(/dolfin\/(\d+(\.\d+)?)/i)
+      };
+    }
+    else if (tizen) {
+      result = {
+        name: 'Tizen'
+      , tizen: t
+      , version: getFirstMatch(/(?:tizen\s?)?browser\/(\d+(\.\d+)?)/i) || versionIdentifier
+      };
+    }
+    else if (/qupzilla/i.test(ua)) {
+      result = {
+        name: 'QupZilla'
+        , qupzilla: t
+        , version: getFirstMatch(/(?:qupzilla)[\s\/](\d+(?:\.\d+)+)/i) || versionIdentifier
+      }
+    }
+    else if (/chromium/i.test(ua)) {
+      result = {
+        name: 'Chromium'
+        , chromium: t
+        , version: getFirstMatch(/(?:chromium)[\s\/](\d+(?:\.\d+)?)/i) || versionIdentifier
+      }
+    }
+    else if (/chrome|crios|crmo/i.test(ua)) {
+      result = {
+        name: 'Chrome'
+        , chrome: t
+        , version: getFirstMatch(/(?:chrome|crios|crmo)\/(\d+(\.\d+)?)/i)
+      }
+    }
+    else if (android) {
+      result = {
+        name: 'Android'
+        , version: versionIdentifier
+      }
+    }
+    else if (/safari|applewebkit/i.test(ua)) {
+      result = {
+        name: 'Safari'
+      , safari: t
+      }
+      if (versionIdentifier) {
+        result.version = versionIdentifier
+      }
+    }
+    else if (iosdevice) {
+      result = {
+        name : iosdevice == 'iphone' ? 'iPhone' : iosdevice == 'ipad' ? 'iPad' : 'iPod'
+      }
+      // WTF: version is not part of user agent in web apps
+      if (versionIdentifier) {
+        result.version = versionIdentifier
+      }
+    }
+    else if(/googlebot/i.test(ua)) {
+      result = {
+        name: 'Googlebot'
+      , googlebot: t
+      , version: getFirstMatch(/googlebot\/(\d+(\.\d+))/i) || versionIdentifier
+      }
+    }
+    else {
+      result = {
+        name: getFirstMatch(/^(.*)\/(.*) /),
+        version: getSecondMatch(/^(.*)\/(.*) /)
+     };
+   }
+
+    // set webkit or gecko flag for browsers based on these engines
+    if (!result.msedge && /(apple)?webkit/i.test(ua)) {
+      if (/(apple)?webkit\/537\.36/i.test(ua)) {
+        result.name = result.name || "Blink"
+        result.blink = t
+      } else {
+        result.name = result.name || "Webkit"
+        result.webkit = t
+      }
+      if (!result.version && versionIdentifier) {
+        result.version = versionIdentifier
+      }
+    } else if (!result.opera && /gecko\//i.test(ua)) {
+      result.name = result.name || "Gecko"
+      result.gecko = t
+      result.version = result.version || getFirstMatch(/gecko\/(\d+(\.\d+)?)/i)
+    }
+
+    // set OS flags for platforms that have multiple browsers
+    if (!result.msedge && (android || result.silk)) {
+      result.android = t
+    } else if (iosdevice) {
+      result[iosdevice] = t
+      result.ios = t
+    } else if (mac) {
+      result.mac = t
+    } else if (xbox) {
+      result.xbox = t
+    } else if (windows) {
+      result.windows = t
+    } else if (linux) {
+      result.linux = t
+    }
+
+    // OS version extraction
+    var osVersion = '';
+    if (result.windowsphone) {
+      osVersion = getFirstMatch(/windows phone (?:os)?\s?(\d+(\.\d+)*)/i);
+    } else if (iosdevice) {
+      osVersion = getFirstMatch(/os (\d+([_\s]\d+)*) like mac os x/i);
+      osVersion = osVersion.replace(/[_\s]/g, '.');
+    } else if (android) {
+      osVersion = getFirstMatch(/android[ \/-](\d+(\.\d+)*)/i);
+    } else if (result.webos) {
+      osVersion = getFirstMatch(/(?:web|hpw)os\/(\d+(\.\d+)*)/i);
+    } else if (result.blackberry) {
+      osVersion = getFirstMatch(/rim\stablet\sos\s(\d+(\.\d+)*)/i);
+    } else if (result.bada) {
+      osVersion = getFirstMatch(/bada\/(\d+(\.\d+)*)/i);
+    } else if (result.tizen) {
+      osVersion = getFirstMatch(/tizen[\/\s](\d+(\.\d+)*)/i);
+    }
+    if (osVersion) {
+      result.osversion = osVersion;
+    }
+
+    // device type extraction
+    var osMajorVersion = osVersion.split('.')[0];
+    if (
+         tablet
+      || nexusTablet
+      || iosdevice == 'ipad'
+      || (android && (osMajorVersion == 3 || (osMajorVersion >= 4 && !mobile)))
+      || result.silk
+    ) {
+      result.tablet = t
+    } else if (
+         mobile
+      || iosdevice == 'iphone'
+      || iosdevice == 'ipod'
+      || android
+      || nexusMobile
+      || result.blackberry
+      || result.webos
+      || result.bada
+    ) {
+      result.mobile = t
+    }
+
+    // Graded Browser Support
+    // http://developer.yahoo.com/yui/articles/gbs
+    if (result.msedge ||
+        (result.msie && result.version >= 10) ||
+        (result.yandexbrowser && result.version >= 15) ||
+		    (result.vivaldi && result.version >= 1.0) ||
+        (result.chrome && result.version >= 20) ||
+        (result.samsungBrowser && result.version >= 4) ||
+        (result.firefox && result.version >= 20.0) ||
+        (result.safari && result.version >= 6) ||
+        (result.opera && result.version >= 10.0) ||
+        (result.ios && result.osversion && result.osversion.split(".")[0] >= 6) ||
+        (result.blackberry && result.version >= 10.1)
+        || (result.chromium && result.version >= 20)
+        ) {
+      result.a = t;
+    }
+    else if ((result.msie && result.version < 10) ||
+        (result.chrome && result.version < 20) ||
+        (result.firefox && result.version < 20.0) ||
+        (result.safari && result.version < 6) ||
+        (result.opera && result.version < 10.0) ||
+        (result.ios && result.osversion && result.osversion.split(".")[0] < 6)
+        || (result.chromium && result.version < 20)
+        ) {
+      result.c = t
+    } else result.x = t
+
+    return result
+  }
+
+  var bowser = detect(typeof navigator !== 'undefined' ? navigator.userAgent || '' : '')
+
+  bowser.test = function (browserList) {
+    for (var i = 0; i < browserList.length; ++i) {
+      var browserItem = browserList[i];
+      if (typeof browserItem=== 'string') {
+        if (browserItem in bowser) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get version precisions count
+   *
+   * @example
+   *   getVersionPrecision("1.10.3") // 3
+   *
+   * @param  {string} version
+   * @return {number}
+   */
+  function getVersionPrecision(version) {
+    return version.split(".").length;
+  }
+
+  /**
+   * Array::map polyfill
+   *
+   * @param  {Array} arr
+   * @param  {Function} iterator
+   * @return {Array}
+   */
+  function map(arr, iterator) {
+    var result = [], i;
+    if (Array.prototype.map) {
+      return Array.prototype.map.call(arr, iterator);
+    }
+    for (i = 0; i < arr.length; i++) {
+      result.push(iterator(arr[i]));
+    }
+    return result;
+  }
+
+  /**
+   * Calculate browser version weight
+   *
+   * @example
+   *   compareVersions(['1.10.2.1',  '1.8.2.1.90'])    // 1
+   *   compareVersions(['1.010.2.1', '1.09.2.1.90']);  // 1
+   *   compareVersions(['1.10.2.1',  '1.10.2.1']);     // 0
+   *   compareVersions(['1.10.2.1',  '1.0800.2']);     // -1
+   *
+   * @param  {Array<String>} versions versions to compare
+   * @return {Number} comparison result
+   */
+  function compareVersions(versions) {
+    // 1) get common precision for both versions, for example for "10.0" and "9" it should be 2
+    var precision = Math.max(getVersionPrecision(versions[0]), getVersionPrecision(versions[1]));
+    var chunks = map(versions, function (version) {
+      var delta = precision - getVersionPrecision(version);
+
+      // 2) "9" -> "9.0" (for precision = 2)
+      version = version + new Array(delta + 1).join(".0");
+
+      // 3) "9.0" -> ["000000000"", "000000009"]
+      return map(version.split("."), function (chunk) {
+        return new Array(20 - chunk.length).join("0") + chunk;
+      }).reverse();
+    });
+
+    // iterate in reverse order by reversed chunks array
+    while (--precision >= 0) {
+      // 4) compare: "000000009" > "000000010" = false (but "9" > "10" = true)
+      if (chunks[0][precision] > chunks[1][precision]) {
+        return 1;
+      }
+      else if (chunks[0][precision] === chunks[1][precision]) {
+        if (precision === 0) {
+          // all version chunks are same
+          return 0;
+        }
+      }
+      else {
+        return -1;
+      }
+    }
+  }
+
+  /**
+   * Check if browser is unsupported
+   *
+   * @example
+   *   bowser.isUnsupportedBrowser({
+   *     msie: "10",
+   *     firefox: "23",
+   *     chrome: "29",
+   *     safari: "5.1",
+   *     opera: "16",
+   *     phantom: "534"
+   *   });
+   *
+   * @param  {Object}  minVersions map of minimal version to browser
+   * @param  {Boolean} [strictMode = false] flag to return false if browser wasn't found in map
+   * @param  {String}  [ua] user agent string
+   * @return {Boolean}
+   */
+  function isUnsupportedBrowser(minVersions, strictMode, ua) {
+    var _bowser = bowser;
+
+    // make strictMode param optional with ua param usage
+    if (typeof strictMode === 'string') {
+      ua = strictMode;
+      strictMode = void(0);
+    }
+
+    if (strictMode === void(0)) {
+      strictMode = false;
+    }
+    if (ua) {
+      _bowser = detect(ua);
+    }
+
+    var version = "" + _bowser.version;
+    for (var browser in minVersions) {
+      if (minVersions.hasOwnProperty(browser)) {
+        if (_bowser[browser]) {
+          // browser version and min supported version.
+          return compareVersions([version, minVersions[browser]]) < 0;
+        }
+      }
+    }
+
+    return strictMode; // not found
+  }
+
+  /**
+   * Check if browser is supported
+   *
+   * @param  {Object} minVersions map of minimal version to browser
+   * @param  {Boolean} [strictMode = false] flag to return false if browser wasn't found in map
+   * @param  {String}  [ua] user agent string
+   * @return {Boolean}
+   */
+  function check(minVersions, strictMode, ua) {
+    return !isUnsupportedBrowser(minVersions, strictMode, ua);
+  }
+
+  bowser.isUnsupportedBrowser = isUnsupportedBrowser;
+  bowser.compareVersions = compareVersions;
+  bowser.check = check;
+
+  /*
+   * Set our detect method to the main bowser object so we can
+   * reuse it to test other user agents.
+   * This is needed to implement future tests.
+   */
+  bowser._detect = detect;
+
+  return bowser
+});
+
+},{}],46:[function(require,module,exports){
+arguments[4][33][0].apply(exports,arguments)
+},{"./debug":47,"dup":33}],47:[function(require,module,exports){
+arguments[4][34][0].apply(exports,arguments)
+},{"dup":34,"ms":48}],48:[function(require,module,exports){
+arguments[4][35][0].apply(exports,arguments)
+},{"dup":35}],49:[function(require,module,exports){
+/*!
+ * @name JavaScript/NodeJS Merge v1.2.0
+ * @author yeikos
+ * @repository https://github.com/yeikos/js.merge
+
+ * Copyright 2014 yeikos - MIT license
+ * https://raw.github.com/yeikos/js.merge/master/LICENSE
+ */
+
+;(function(isNode) {
+
+	/**
+	 * Merge one or more objects
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
+
+	var Public = function(clone) {
+
+		return merge(clone === true, false, arguments);
+
+	}, publicName = 'merge';
+
+	/**
+	 * Merge two or more objects recursively
+	 * @param bool? clone
+	 * @param mixed,... arguments
+	 * @return object
+	 */
+
+	Public.recursive = function(clone) {
+
+		return merge(clone === true, true, arguments);
+
+	};
+
+	/**
+	 * Clone the input removing any reference
+	 * @param mixed input
+	 * @return mixed
+	 */
+
+	Public.clone = function(input) {
+
+		var output = input,
+			type = typeOf(input),
+			index, size;
+
+		if (type === 'array') {
+
+			output = [];
+			size = input.length;
+
+			for (index=0;index<size;++index)
+
+				output[index] = Public.clone(input[index]);
+
+		} else if (type === 'object') {
+
+			output = {};
+
+			for (index in input)
+
+				output[index] = Public.clone(input[index]);
+
+		}
+
+		return output;
+
+	};
+
+	/**
+	 * Merge two objects recursively
+	 * @param mixed input
+	 * @param mixed extend
+	 * @return mixed
+	 */
+
+	function merge_recursive(base, extend) {
+
+		if (typeOf(base) !== 'object')
+
+			return extend;
+
+		for (var key in extend) {
+
+			if (typeOf(base[key]) === 'object' && typeOf(extend[key]) === 'object') {
+
+				base[key] = merge_recursive(base[key], extend[key]);
+
+			} else {
+
+				base[key] = extend[key];
+
+			}
+
+		}
+
+		return base;
+
+	}
+
+	/**
+	 * Merge two or more objects
+	 * @param bool clone
+	 * @param bool recursive
+	 * @param array argv
+	 * @return object
+	 */
+
+	function merge(clone, recursive, argv) {
+
+		var result = argv[0],
+			size = argv.length;
+
+		if (clone || typeOf(result) !== 'object')
+
+			result = {};
+
+		for (var index=0;index<size;++index) {
+
+			var item = argv[index],
+
+				type = typeOf(item);
+
+			if (type !== 'object') continue;
+
+			for (var key in item) {
+
+				var sitem = clone ? Public.clone(item[key]) : item[key];
+
+				if (recursive) {
+
+					result[key] = merge_recursive(result[key], sitem);
+
+				} else {
+
+					result[key] = sitem;
+
+				}
+
+			}
+
+		}
+
+		return result;
+
+	}
+
+	/**
+	 * Get type of variable
+	 * @param mixed input
+	 * @return string
+	 *
+	 * @see http://jsperf.com/typeofvar
+	 */
+
+	function typeOf(input) {
+
+		return ({}).toString.call(input).slice(8, -1).toLowerCase();
+
+	}
+
+	if (isNode) {
+
+		module.exports = Public;
+
+	} else {
+
+		window[publicName] = Public;
+
+	}
+
+})(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
+},{}],50:[function(require,module,exports){
+module.exports={
+  "name": "rtcninja",
+  "version": "0.7.0",
+  "description": "WebRTC API wrapper to deal with different browsers",
+  "author": "Iñaki Baz Castillo <inaki.baz@eface2face.com> (http://eface2face.com)",
+  "contributors": [
+    "Jesús Pérez <jesus.perez@eface2face.com>"
+  ],
+  "license": "MIT",
+  "main": "lib/rtcninja.js",
+  "homepage": "https://github.com/eface2face/rtcninja.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eface2face/rtcninja.js.git"
+  },
+  "keywords": [
+    "webrtc"
+  ],
+  "engines": {
+    "node": ">=0.12.0"
+  },
+  "dependencies": {
+    "bowser": "^1.4.6",
+    "debug": "^2.2.0",
+    "merge": "^1.2.0"
+  },
+  "devDependencies": {
+    "browserify": "^13.1.0",
+    "gulp": "git+https://github.com/gulpjs/gulp.git#4.0",
+    "gulp-expect-file": "0.0.7",
+    "gulp-filelog": "^0.4.1",
+    "gulp-header": "^1.8.8",
+    "gulp-jscs": "^3.0.2",
+    "gulp-jscs-stylish": "^1.4.0",
+    "gulp-jshint": "^2.0.1",
+    "gulp-rename": "^1.2.2",
+    "gulp-uglify": "^1.5.4",
+    "jshint": "^2.9.3",
+    "jshint-stylish": "^2.2.1",
+    "vinyl-source-stream": "^1.1.0"
+  }
+}
+
 },{}]},{},[7])(7)
+});
+
+/**
+ * @preserve A JavaScript implementation of the SHA family of hashes, as
+ * defined in FIPS PUB 180-2 as well as the corresponding HMAC implementation
+ * as defined in FIPS PUB 198a
+ *
+ * Copyright Brian Turek 2008-2013
+ * Distributed under the BSD License
+ * See http://caligatio.github.com/jsSHA/ for more information
+ *
+ * Several functions taken from Paul Johnston
+ */
+
+ /**
+  * SUPPORTED_ALGS is the stub for a compile flag that will cause pruning of
+  * functions that are not needed when a limited number of SHA families are
+  * selected
+  *
+  * @define {number} ORed value of SHA variants to be supported
+  *   1 = SHA-1, 2 = SHA-224/SHA-256, 4 = SHA-384/SHA-512
+  */
+var SUPPORTED_ALGS = 4 | 2 | 1;
+
+(function (global)
+{
+  "use strict";
+  /**
+   * Int_64 is a object for 2 32-bit numbers emulating a 64-bit number
+   *
+   * @private
+   * @constructor
+   * @this {Int_64}
+   * @param {number} msint_32 The most significant 32-bits of a 64-bit number
+   * @param {number} lsint_32 The least significant 32-bits of a 64-bit number
+   */
+  function Int_64(msint_32, lsint_32)
+  {
+    this.highOrder = msint_32;
+    this.lowOrder = lsint_32;
+  }
+
+  /**
+   * Convert a string to an array of big-endian words
+   *
+   * @private
+   * @param {string} str String to be converted to binary representation
+   * @param {string} utfType The Unicode type, UTF8 or UTF16, to use to
+   *   encode the source string
+   * @return {{value : Array.<number>, binLen : number}} Hash list where
+   *   "value" contains the output number array and "binLen" is the binary
+   *   length of "value"
+   */
+  function str2binb(str, utfType)
+  {
+    var bin = [], codePnt, binArr = [], byteCnt = 0, i, j;
+
+    if ("UTF8" === utfType)
+    {
+      for (i = 0; i < str.length; i += 1)
+      {
+        codePnt = str.charCodeAt(i);
+        binArr = [];
+
+        if (0x800 < codePnt)
+        {
+          binArr[0] = 0xE0 | ((codePnt & 0xF000) >>> 12);
+          binArr[1] = 0x80 | ((codePnt & 0xFC0) >>> 6);
+          binArr[2] = 0x80 | (codePnt & 0x3F);
+        }
+        else if (0x80 < codePnt)
+        {
+          binArr[0] = 0xC0 | ((codePnt & 0x7C0) >>> 6);
+          binArr[1] = 0x80 | (codePnt & 0x3F);
+        }
+        else
+        {
+          binArr[0] = codePnt;
+        }
+
+        for (j = 0; j < binArr.length; j += 1)
+        {
+          bin[byteCnt >>> 2] |= binArr[j] << (24 - (8 * (byteCnt % 4)));
+          byteCnt += 1;
+        }
+      }
+    }
+    else if ("UTF16" === utfType)
+    {
+      for (i = 0; i < str.length; i += 1)
+      {
+        codePnt = str.charCodeAt(i);
+
+        bin[byteCnt >>> 2] |= str.charCodeAt(i) << (16 - (8 * (byteCnt % 4)));
+        byteCnt += 2;
+      }
+    }
+    return {"value" : bin, "binLen" : byteCnt * 8};
+  }
+
+  /**
+   * Convert a hex string to an array of big-endian words
+   *
+   * @private
+   * @param {string} str String to be converted to binary representation
+   * @return {{value : Array.<number>, binLen : number}} Hash list where
+   *   "value" contains the output number array and "binLen" is the binary
+   *   length of "value"
+   */
+  function hex2binb(str)
+  {
+    var bin = [], length = str.length, i, num;
+
+    if (0 !== (length % 2))
+    {
+      throw "String of HEX type must be in byte increments";
+    }
+
+    for (i = 0; i < length; i += 2)
+    {
+      num = parseInt(str.substr(i, 2), 16);
+      if (!isNaN(num))
+      {
+        bin[i >>> 3] |= num << (24 - (4 * (i % 8)));
+      }
+      else
+      {
+        throw "String of HEX type contains invalid characters";
+      }
+    }
+
+    return {"value" : bin, "binLen" : length * 4};
+  }
+
+  /**
+   * Convert a base-64 string to an array of big-endian words
+   *
+   * @private
+   * @param {string} str String to be converted to binary representation
+   * @return {{value : Array.<number>, binLen : number}} Hash list where
+   *   "value" contains the output number array and "binLen" is the binary
+   *   length of "value"
+   */
+  function b642binb(str)
+  {
+    var retVal = [], byteCnt = 0, index, i, j, tmpInt, strPart, firstEqual,
+      b64Tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    if (-1 === str.search(/^[a-zA-Z0-9=+\/]+$/))
+    {
+      throw "Invalid character in base-64 string";
+    }
+    firstEqual = str.indexOf('=');
+    str = str.replace(/\=/g, '');
+    if ((-1 !== firstEqual) && (firstEqual < str.length))
+    {
+      throw "Invalid '=' found in base-64 string";
+    }
+
+    for (i = 0; i < str.length; i += 4)
+    {
+      strPart = str.substr(i, 4);
+      tmpInt = 0;
+
+      for (j = 0; j < strPart.length; j += 1)
+      {
+        index = b64Tab.indexOf(strPart[j]);
+        tmpInt |= index << (18 - (6 * j));
+      }
+
+      for (j = 0; j < strPart.length - 1; j += 1)
+      {
+        retVal[byteCnt >> 2] |= ((tmpInt >>> (16 - (j * 8))) & 0xFF) <<
+          (24 - (8 * (byteCnt % 4)));
+        byteCnt += 1;
+      }
+    }
+
+    return {"value" : retVal, "binLen" : byteCnt * 8};
+  }
+
+  /**
+   * Convert an array of big-endian words to a hex string.
+   *
+   * @private
+   * @param {Array.<number>} binarray Array of integers to be converted to
+   *   hexidecimal representation
+   * @param {{outputUpper : boolean, b64Pad : string}} formatOpts Hash list
+   *   containing validated output formatting options
+   * @return {string} Hexidecimal representation of the parameter in String
+   *   form
+   */
+  function binb2hex(binarray, formatOpts)
+  {
+    var hex_tab = "0123456789abcdef", str = "",
+      length = binarray.length * 4, i, srcByte;
+
+    for (i = 0; i < length; i += 1)
+    {
+      srcByte = binarray[i >>> 2] >>> ((3 - (i % 4)) * 8);
+      str += hex_tab.charAt((srcByte >>> 4) & 0xF) +
+        hex_tab.charAt(srcByte & 0xF);
+    }
+
+    return (formatOpts["outputUpper"]) ? str.toUpperCase() : str;
+  }
+
+  /**
+   * Convert an array of big-endian words to a base-64 string
+   *
+   * @private
+   * @param {Array.<number>} binarray Array of integers to be converted to
+   *   base-64 representation
+   * @param {{outputUpper : boolean, b64Pad : string}} formatOpts Hash list
+   *   containing validated output formatting options
+   * @return {string} Base-64 encoded representation of the parameter in
+   *   String form
+   */
+  function binb2b64(binarray, formatOpts)
+  {
+    var str = "", length = binarray.length * 4, i, j, triplet,
+      b64Tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    for (i = 0; i < length; i += 3)
+    {
+      triplet = (((binarray[i >>> 2] >>> 8 * (3 - i % 4)) & 0xFF) << 16) |
+        (((binarray[i + 1 >>> 2] >>> 8 * (3 - (i + 1) % 4)) & 0xFF) << 8) |
+        ((binarray[i + 2 >>> 2] >>> 8 * (3 - (i + 2) % 4)) & 0xFF);
+      for (j = 0; j < 4; j += 1)
+      {
+        if (i * 8 + j * 6 <= binarray.length * 32)
+        {
+          str += b64Tab.charAt((triplet >>> 6 * (3 - j)) & 0x3F);
+        }
+        else
+        {
+          str += formatOpts["b64Pad"];
+        }
+      }
+    }
+    return str;
+  }
+
+  /**
+   * Validate hash list containing output formatting options, ensuring
+   * presence of every option or adding the default value
+   *
+   * @private
+   * @param {{outputUpper : boolean, b64Pad : string}|undefined} outputOpts
+   *   Hash list of output formatting options
+   * @return {{outputUpper : boolean, b64Pad : string}} Validated hash list
+   *   containing output formatting options
+   */
+  function getOutputOpts(outputOpts)
+  {
+    var retVal = {"outputUpper" : false, "b64Pad" : "="};
+
+    try
+    {
+      if (outputOpts.hasOwnProperty("outputUpper"))
+      {
+        retVal["outputUpper"] = outputOpts["outputUpper"];
+      }
+
+      if (outputOpts.hasOwnProperty("b64Pad"))
+      {
+        retVal["b64Pad"] = outputOpts["b64Pad"];
+      }
+    }
+    catch(ignore)
+    {}
+
+    if ("boolean" !== typeof(retVal["outputUpper"]))
+    {
+      throw "Invalid outputUpper formatting option";
+    }
+
+    if ("string" !== typeof(retVal["b64Pad"]))
+    {
+      throw "Invalid b64Pad formatting option";
+    }
+
+    return retVal;
+  }
+
+  /**
+   * The 32-bit implementation of circular rotate left
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @param {number} n The number of bits to shift
+   * @return {number} The x shifted circularly by n bits
+   */
+  function rotl_32(x, n)
+  {
+    return (x << n) | (x >>> (32 - n));
+  }
+
+  /**
+   * The 32-bit implementation of circular rotate right
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @param {number} n The number of bits to shift
+   * @return {number} The x shifted circularly by n bits
+   */
+  function rotr_32(x, n)
+  {
+    return (x >>> n) | (x << (32 - n));
+  }
+
+  /**
+   * The 64-bit implementation of circular rotate right
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @param {number} n The number of bits to shift
+   * @return {Int_64} The x shifted circularly by n bits
+   */
+  function rotr_64(x, n)
+  {
+    var retVal = null, tmp = new Int_64(x.highOrder, x.lowOrder);
+
+    if (32 >= n)
+    {
+      retVal = new Int_64(
+          (tmp.highOrder >>> n) | ((tmp.lowOrder << (32 - n)) & 0xFFFFFFFF),
+          (tmp.lowOrder >>> n) | ((tmp.highOrder << (32 - n)) & 0xFFFFFFFF)
+        );
+    }
+    else
+    {
+      retVal = new Int_64(
+          (tmp.lowOrder >>> (n - 32)) | ((tmp.highOrder << (64 - n)) & 0xFFFFFFFF),
+          (tmp.highOrder >>> (n - 32)) | ((tmp.lowOrder << (64 - n)) & 0xFFFFFFFF)
+        );
+    }
+
+    return retVal;
+  }
+
+  /**
+   * The 32-bit implementation of shift right
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @param {number} n The number of bits to shift
+   * @return {number} The x shifted by n bits
+   */
+  function shr_32(x, n)
+  {
+    return x >>> n;
+  }
+
+  /**
+   * The 64-bit implementation of shift right
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @param {number} n The number of bits to shift
+   * @return {Int_64} The x shifted by n bits
+   */
+  function shr_64(x, n)
+  {
+    var retVal = null;
+
+    if (32 >= n)
+    {
+      retVal = new Int_64(
+          x.highOrder >>> n,
+          x.lowOrder >>> n | ((x.highOrder << (32 - n)) & 0xFFFFFFFF)
+        );
+    }
+    else
+    {
+      retVal = new Int_64(
+          0,
+          x.highOrder >>> (n - 32)
+        );
+    }
+
+    return retVal;
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Parity function
+   *
+   * @private
+   * @param {number} x The first 32-bit integer argument
+   * @param {number} y The second 32-bit integer argument
+   * @param {number} z The third 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function parity_32(x, y, z)
+  {
+    return x ^ y ^ z;
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Ch function
+   *
+   * @private
+   * @param {number} x The first 32-bit integer argument
+   * @param {number} y The second 32-bit integer argument
+   * @param {number} z The third 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function ch_32(x, y, z)
+  {
+    return (x & y) ^ (~x & z);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Ch function
+   *
+   * @private
+   * @param {Int_64} x The first 64-bit integer argument
+   * @param {Int_64} y The second 64-bit integer argument
+   * @param {Int_64} z The third 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function ch_64(x, y, z)
+  {
+    return new Int_64(
+        (x.highOrder & y.highOrder) ^ (~x.highOrder & z.highOrder),
+        (x.lowOrder & y.lowOrder) ^ (~x.lowOrder & z.lowOrder)
+      );
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Maj function
+   *
+   * @private
+   * @param {number} x The first 32-bit integer argument
+   * @param {number} y The second 32-bit integer argument
+   * @param {number} z The third 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function maj_32(x, y, z)
+  {
+    return (x & y) ^ (x & z) ^ (y & z);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Maj function
+   *
+   * @private
+   * @param {Int_64} x The first 64-bit integer argument
+   * @param {Int_64} y The second 64-bit integer argument
+   * @param {Int_64} z The third 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function maj_64(x, y, z)
+  {
+    return new Int_64(
+        (x.highOrder & y.highOrder) ^
+        (x.highOrder & z.highOrder) ^
+        (y.highOrder & z.highOrder),
+        (x.lowOrder & y.lowOrder) ^
+        (x.lowOrder & z.lowOrder) ^
+        (y.lowOrder & z.lowOrder)
+      );
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Sigma0 function
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function sigma0_32(x)
+  {
+    return rotr_32(x, 2) ^ rotr_32(x, 13) ^ rotr_32(x, 22);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Sigma0 function
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function sigma0_64(x)
+  {
+    var rotr28 = rotr_64(x, 28), rotr34 = rotr_64(x, 34),
+      rotr39 = rotr_64(x, 39);
+
+    return new Int_64(
+        rotr28.highOrder ^ rotr34.highOrder ^ rotr39.highOrder,
+        rotr28.lowOrder ^ rotr34.lowOrder ^ rotr39.lowOrder);
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Sigma1 function
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function sigma1_32(x)
+  {
+    return rotr_32(x, 6) ^ rotr_32(x, 11) ^ rotr_32(x, 25);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Sigma1 function
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function sigma1_64(x)
+  {
+    var rotr14 = rotr_64(x, 14), rotr18 = rotr_64(x, 18),
+      rotr41 = rotr_64(x, 41);
+
+    return new Int_64(
+        rotr14.highOrder ^ rotr18.highOrder ^ rotr41.highOrder,
+        rotr14.lowOrder ^ rotr18.lowOrder ^ rotr41.lowOrder);
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Gamma0 function
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function gamma0_32(x)
+  {
+    return rotr_32(x, 7) ^ rotr_32(x, 18) ^ shr_32(x, 3);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Gamma0 function
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function gamma0_64(x)
+  {
+    var rotr1 = rotr_64(x, 1), rotr8 = rotr_64(x, 8), shr7 = shr_64(x, 7);
+
+    return new Int_64(
+        rotr1.highOrder ^ rotr8.highOrder ^ shr7.highOrder,
+        rotr1.lowOrder ^ rotr8.lowOrder ^ shr7.lowOrder
+      );
+  }
+
+  /**
+   * The 32-bit implementation of the NIST specified Gamma1 function
+   *
+   * @private
+   * @param {number} x The 32-bit integer argument
+   * @return {number} The NIST specified output of the function
+   */
+  function gamma1_32(x)
+  {
+    return rotr_32(x, 17) ^ rotr_32(x, 19) ^ shr_32(x, 10);
+  }
+
+  /**
+   * The 64-bit implementation of the NIST specified Gamma1 function
+   *
+   * @private
+   * @param {Int_64} x The 64-bit integer argument
+   * @return {Int_64} The NIST specified output of the function
+   */
+  function gamma1_64(x)
+  {
+    var rotr19 = rotr_64(x, 19), rotr61 = rotr_64(x, 61),
+      shr6 = shr_64(x, 6);
+
+    return new Int_64(
+        rotr19.highOrder ^ rotr61.highOrder ^ shr6.highOrder,
+        rotr19.lowOrder ^ rotr61.lowOrder ^ shr6.lowOrder
+      );
+  }
+
+  /**
+   * Add two 32-bit integers, wrapping at 2^32. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {number} a The first 32-bit integer argument to be added
+   * @param {number} b The second 32-bit integer argument to be added
+   * @return {number} The sum of a + b
+   */
+  function safeAdd_32_2(a, b)
+  {
+    var lsw = (a & 0xFFFF) + (b & 0xFFFF),
+      msw = (a >>> 16) + (b >>> 16) + (lsw >>> 16);
+
+    return ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+  }
+
+  /**
+   * Add four 32-bit integers, wrapping at 2^32. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {number} a The first 32-bit integer argument to be added
+   * @param {number} b The second 32-bit integer argument to be added
+   * @param {number} c The third 32-bit integer argument to be added
+   * @param {number} d The fourth 32-bit integer argument to be added
+   * @return {number} The sum of a + b + c + d
+   */
+  function safeAdd_32_4(a, b, c, d)
+  {
+    var lsw = (a & 0xFFFF) + (b & 0xFFFF) + (c & 0xFFFF) + (d & 0xFFFF),
+      msw = (a >>> 16) + (b >>> 16) + (c >>> 16) + (d >>> 16) +
+        (lsw >>> 16);
+
+    return ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+  }
+
+  /**
+   * Add five 32-bit integers, wrapping at 2^32. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {number} a The first 32-bit integer argument to be added
+   * @param {number} b The second 32-bit integer argument to be added
+   * @param {number} c The third 32-bit integer argument to be added
+   * @param {number} d The fourth 32-bit integer argument to be added
+   * @param {number} e The fifth 32-bit integer argument to be added
+   * @return {number} The sum of a + b + c + d + e
+   */
+  function safeAdd_32_5(a, b, c, d, e)
+  {
+    var lsw = (a & 0xFFFF) + (b & 0xFFFF) + (c & 0xFFFF) + (d & 0xFFFF) +
+        (e & 0xFFFF),
+      msw = (a >>> 16) + (b >>> 16) + (c >>> 16) + (d >>> 16) +
+        (e >>> 16) + (lsw >>> 16);
+
+    return ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+  }
+
+  /**
+   * Add two 64-bit integers, wrapping at 2^64. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {Int_64} x The first 64-bit integer argument to be added
+   * @param {Int_64} y The second 64-bit integer argument to be added
+   * @return {Int_64} The sum of x + y
+   */
+  function safeAdd_64_2(x, y)
+  {
+    var lsw, msw, lowOrder, highOrder;
+
+    lsw = (x.lowOrder & 0xFFFF) + (y.lowOrder & 0xFFFF);
+    msw = (x.lowOrder >>> 16) + (y.lowOrder >>> 16) + (lsw >>> 16);
+    lowOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    lsw = (x.highOrder & 0xFFFF) + (y.highOrder & 0xFFFF) + (msw >>> 16);
+    msw = (x.highOrder >>> 16) + (y.highOrder >>> 16) + (lsw >>> 16);
+    highOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    return new Int_64(highOrder, lowOrder);
+  }
+
+  /**
+   * Add four 64-bit integers, wrapping at 2^64. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {Int_64} a The first 64-bit integer argument to be added
+   * @param {Int_64} b The second 64-bit integer argument to be added
+   * @param {Int_64} c The third 64-bit integer argument to be added
+   * @param {Int_64} d The fouth 64-bit integer argument to be added
+   * @return {Int_64} The sum of a + b + c + d
+   */
+  function safeAdd_64_4(a, b, c, d)
+  {
+    var lsw, msw, lowOrder, highOrder;
+
+    lsw = (a.lowOrder & 0xFFFF) + (b.lowOrder & 0xFFFF) +
+      (c.lowOrder & 0xFFFF) + (d.lowOrder & 0xFFFF);
+    msw = (a.lowOrder >>> 16) + (b.lowOrder >>> 16) +
+      (c.lowOrder >>> 16) + (d.lowOrder >>> 16) + (lsw >>> 16);
+    lowOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    lsw = (a.highOrder & 0xFFFF) + (b.highOrder & 0xFFFF) +
+      (c.highOrder & 0xFFFF) + (d.highOrder & 0xFFFF) + (msw >>> 16);
+    msw = (a.highOrder >>> 16) + (b.highOrder >>> 16) +
+      (c.highOrder >>> 16) + (d.highOrder >>> 16) + (lsw >>> 16);
+    highOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    return new Int_64(highOrder, lowOrder);
+  }
+
+  /**
+   * Add five 64-bit integers, wrapping at 2^64. This uses 16-bit operations
+   * internally to work around bugs in some JS interpreters.
+   *
+   * @private
+   * @param {Int_64} a The first 64-bit integer argument to be added
+   * @param {Int_64} b The second 64-bit integer argument to be added
+   * @param {Int_64} c The third 64-bit integer argument to be added
+   * @param {Int_64} d The fouth 64-bit integer argument to be added
+   * @param {Int_64} e The fouth 64-bit integer argument to be added
+   * @return {Int_64} The sum of a + b + c + d + e
+   */
+  function safeAdd_64_5(a, b, c, d, e)
+  {
+    var lsw, msw, lowOrder, highOrder;
+
+    lsw = (a.lowOrder & 0xFFFF) + (b.lowOrder & 0xFFFF) +
+      (c.lowOrder & 0xFFFF) + (d.lowOrder & 0xFFFF) +
+      (e.lowOrder & 0xFFFF);
+    msw = (a.lowOrder >>> 16) + (b.lowOrder >>> 16) +
+      (c.lowOrder >>> 16) + (d.lowOrder >>> 16) + (e.lowOrder >>> 16) +
+      (lsw >>> 16);
+    lowOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    lsw = (a.highOrder & 0xFFFF) + (b.highOrder & 0xFFFF) +
+      (c.highOrder & 0xFFFF) + (d.highOrder & 0xFFFF) +
+      (e.highOrder & 0xFFFF) + (msw >>> 16);
+    msw = (a.highOrder >>> 16) + (b.highOrder >>> 16) +
+      (c.highOrder >>> 16) + (d.highOrder >>> 16) +
+      (e.highOrder >>> 16) + (lsw >>> 16);
+    highOrder = ((msw & 0xFFFF) << 16) | (lsw & 0xFFFF);
+
+    return new Int_64(highOrder, lowOrder);
+  }
+
+  /**
+   * Calculates the SHA-1 hash of the string set at instantiation
+   *
+   * @private
+   * @param {Array.<number>} message The binary array representation of the
+   *   string to hash
+   * @param {number} messageLen The number of bits in the message
+   * @return {Array.<number>} The array of integers representing the SHA-1
+   *   hash of message
+   */
+  function coreSHA1(message, messageLen)
+  {
+    var W = [], a, b, c, d, e, T, ch = ch_32, parity = parity_32,
+      maj = maj_32, rotl = rotl_32, safeAdd_2 = safeAdd_32_2, i, t,
+      safeAdd_5 = safeAdd_32_5, appendedMessageLength,
+      H = [
+        0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0
+      ];
+
+    /* Append '1' at the end of the binary string */
+    message[messageLen >>> 5] |= 0x80 << (24 - (messageLen % 32));
+    /* Append length of binary string in the position such that the new
+    length is a multiple of 512.  Logic does not work for even multiples
+    of 512 but there can never be even multiples of 512 */
+    message[(((messageLen + 65) >>> 9) << 4) + 15] = messageLen;
+
+    appendedMessageLength = message.length;
+
+    for (i = 0; i < appendedMessageLength; i += 16)
+    {
+      a = H[0];
+      b = H[1];
+      c = H[2];
+      d = H[3];
+      e = H[4];
+
+      for (t = 0; t < 80; t += 1)
+      {
+        if (t < 16)
+        {
+          W[t] = message[t + i];
+        }
+        else
+        {
+          W[t] = rotl(W[t - 3] ^ W[t - 8] ^ W[t - 14] ^ W[t - 16], 1);
+        }
+
+        if (t < 20)
+        {
+          T = safeAdd_5(rotl(a, 5), ch(b, c, d), e, 0x5a827999, W[t]);
+        }
+        else if (t < 40)
+        {
+          T = safeAdd_5(rotl(a, 5), parity(b, c, d), e, 0x6ed9eba1, W[t]);
+        }
+        else if (t < 60)
+        {
+          T = safeAdd_5(rotl(a, 5), maj(b, c, d), e, 0x8f1bbcdc, W[t]);
+        } else {
+          T = safeAdd_5(rotl(a, 5), parity(b, c, d), e, 0xca62c1d6, W[t]);
+        }
+
+        e = d;
+        d = c;
+        c = rotl(b, 30);
+        b = a;
+        a = T;
+      }
+
+      H[0] = safeAdd_2(a, H[0]);
+      H[1] = safeAdd_2(b, H[1]);
+      H[2] = safeAdd_2(c, H[2]);
+      H[3] = safeAdd_2(d, H[3]);
+      H[4] = safeAdd_2(e, H[4]);
+    }
+
+    return H;
+  }
+
+  /**
+   * Calculates the desired SHA-2 hash of the string set at instantiation
+   *
+   * @private
+   * @param {Array.<number>} message The binary array representation of the
+   *   string to hash
+   * @param {number} messageLen The number of bits in message
+   * @param {string} variant The desired SHA-2 variant
+   * @return {Array.<number>} The array of integers representing the SHA-2
+   *   hash of message
+   */
+  function coreSHA2(message, messageLen, variant)
+  {
+    var a, b, c, d, e, f, g, h, T1, T2, H, numRounds, lengthPosition, i, t,
+      binaryStringInc, binaryStringMult, safeAdd_2, safeAdd_4, safeAdd_5,
+      gamma0, gamma1, sigma0, sigma1, ch, maj, Int, W = [],
+      appendedMessageLength, retVal,
+      K = [
+        0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
+        0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
+        0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,
+        0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174,
+        0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC,
+        0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
+        0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7,
+        0xC6E00BF3, 0xD5A79147, 0x06CA6351, 0x14292967,
+        0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13,
+        0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
+        0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3,
+        0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
+        0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5,
+        0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F, 0x682E6FF3,
+        0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
+        0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2
+      ],
+      H_trunc = [
+        0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939,
+        0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4
+      ],
+      H_full = [
+        0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A,
+        0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19
+      ];
+
+    /* Set up the various function handles and variable for the specific
+     * variant */
+    if ((variant === "SHA-224" || variant === "SHA-256") &&
+      (2 & SUPPORTED_ALGS))
+    {
+      /* 32-bit variant */
+      numRounds = 64;
+      lengthPosition = (((messageLen + 65) >>> 9) << 4) + 15;
+      binaryStringInc = 16;
+      binaryStringMult = 1;
+      Int = Number;
+      safeAdd_2 = safeAdd_32_2;
+      safeAdd_4 = safeAdd_32_4;
+      safeAdd_5 = safeAdd_32_5;
+      gamma0 = gamma0_32;
+      gamma1 = gamma1_32;
+      sigma0 = sigma0_32;
+      sigma1 = sigma1_32;
+      maj = maj_32;
+      ch = ch_32;
+
+      if ("SHA-224" === variant)
+      {
+        H = H_trunc;
+      }
+      else /* "SHA-256" === variant */
+      {
+        H = H_full;
+      }
+    }
+    else if ((variant === "SHA-384" || variant === "SHA-512") &&
+      (4 & SUPPORTED_ALGS))
+    {
+      /* 64-bit variant */
+      numRounds = 80;
+      lengthPosition = (((messageLen + 128) >>> 10) << 5) + 31;
+      binaryStringInc = 32;
+      binaryStringMult = 2;
+      Int = Int_64;
+      safeAdd_2 = safeAdd_64_2;
+      safeAdd_4 = safeAdd_64_4;
+      safeAdd_5 = safeAdd_64_5;
+      gamma0 = gamma0_64;
+      gamma1 = gamma1_64;
+      sigma0 = sigma0_64;
+      sigma1 = sigma1_64;
+      maj = maj_64;
+      ch = ch_64;
+
+      K = [
+        new Int(K[ 0], 0xd728ae22), new Int(K[ 1], 0x23ef65cd),
+        new Int(K[ 2], 0xec4d3b2f), new Int(K[ 3], 0x8189dbbc),
+        new Int(K[ 4], 0xf348b538), new Int(K[ 5], 0xb605d019),
+        new Int(K[ 6], 0xaf194f9b), new Int(K[ 7], 0xda6d8118),
+        new Int(K[ 8], 0xa3030242), new Int(K[ 9], 0x45706fbe),
+        new Int(K[10], 0x4ee4b28c), new Int(K[11], 0xd5ffb4e2),
+        new Int(K[12], 0xf27b896f), new Int(K[13], 0x3b1696b1),
+        new Int(K[14], 0x25c71235), new Int(K[15], 0xcf692694),
+        new Int(K[16], 0x9ef14ad2), new Int(K[17], 0x384f25e3),
+        new Int(K[18], 0x8b8cd5b5), new Int(K[19], 0x77ac9c65),
+        new Int(K[20], 0x592b0275), new Int(K[21], 0x6ea6e483),
+        new Int(K[22], 0xbd41fbd4), new Int(K[23], 0x831153b5),
+        new Int(K[24], 0xee66dfab), new Int(K[25], 0x2db43210),
+        new Int(K[26], 0x98fb213f), new Int(K[27], 0xbeef0ee4),
+        new Int(K[28], 0x3da88fc2), new Int(K[29], 0x930aa725),
+        new Int(K[30], 0xe003826f), new Int(K[31], 0x0a0e6e70),
+        new Int(K[32], 0x46d22ffc), new Int(K[33], 0x5c26c926),
+        new Int(K[34], 0x5ac42aed), new Int(K[35], 0x9d95b3df),
+        new Int(K[36], 0x8baf63de), new Int(K[37], 0x3c77b2a8),
+        new Int(K[38], 0x47edaee6), new Int(K[39], 0x1482353b),
+        new Int(K[40], 0x4cf10364), new Int(K[41], 0xbc423001),
+        new Int(K[42], 0xd0f89791), new Int(K[43], 0x0654be30),
+        new Int(K[44], 0xd6ef5218), new Int(K[45], 0x5565a910),
+        new Int(K[46], 0x5771202a), new Int(K[47], 0x32bbd1b8),
+        new Int(K[48], 0xb8d2d0c8), new Int(K[49], 0x5141ab53),
+        new Int(K[50], 0xdf8eeb99), new Int(K[51], 0xe19b48a8),
+        new Int(K[52], 0xc5c95a63), new Int(K[53], 0xe3418acb),
+        new Int(K[54], 0x7763e373), new Int(K[55], 0xd6b2b8a3),
+        new Int(K[56], 0x5defb2fc), new Int(K[57], 0x43172f60),
+        new Int(K[58], 0xa1f0ab72), new Int(K[59], 0x1a6439ec),
+        new Int(K[60], 0x23631e28), new Int(K[61], 0xde82bde9),
+        new Int(K[62], 0xb2c67915), new Int(K[63], 0xe372532b),
+        new Int(0xca273ece, 0xea26619c), new Int(0xd186b8c7, 0x21c0c207),
+        new Int(0xeada7dd6, 0xcde0eb1e), new Int(0xf57d4f7f, 0xee6ed178),
+        new Int(0x06f067aa, 0x72176fba), new Int(0x0a637dc5, 0xa2c898a6),
+        new Int(0x113f9804, 0xbef90dae), new Int(0x1b710b35, 0x131c471b),
+        new Int(0x28db77f5, 0x23047d84), new Int(0x32caab7b, 0x40c72493),
+        new Int(0x3c9ebe0a, 0x15c9bebc), new Int(0x431d67c4, 0x9c100d4c),
+        new Int(0x4cc5d4be, 0xcb3e42b6), new Int(0x597f299c, 0xfc657e2a),
+        new Int(0x5fcb6fab, 0x3ad6faec), new Int(0x6c44198c, 0x4a475817)
+      ];
+
+      if ("SHA-384" === variant)
+      {
+        H = [
+          new Int(0xcbbb9d5d, H_trunc[0]), new Int(0x0629a292a, H_trunc[1]),
+          new Int(0x9159015a, H_trunc[2]), new Int(0x0152fecd8, H_trunc[3]),
+          new Int(0x67332667, H_trunc[4]), new Int(0x98eb44a87, H_trunc[5]),
+          new Int(0xdb0c2e0d, H_trunc[6]), new Int(0x047b5481d, H_trunc[7])
+        ];
+      }
+      else /* "SHA-512" === variant */
+      {
+        H = [
+          new Int(H_full[0], 0xf3bcc908), new Int(H_full[1], 0x84caa73b),
+          new Int(H_full[2], 0xfe94f82b), new Int(H_full[3], 0x5f1d36f1),
+          new Int(H_full[4], 0xade682d1), new Int(H_full[5], 0x2b3e6c1f),
+          new Int(H_full[6], 0xfb41bd6b), new Int(H_full[7], 0x137e2179)
+        ];
+      }
+    }
+    else
+    {
+      throw "Unexpected error in SHA-2 implementation";
+    }
+
+    /* Append '1' at the end of the binary string */
+    message[messageLen >>> 5] |= 0x80 << (24 - messageLen % 32);
+    /* Append length of binary string in the position such that the new
+     * length is correct */
+    message[lengthPosition] = messageLen;
+
+    appendedMessageLength = message.length;
+
+    for (i = 0; i < appendedMessageLength; i += binaryStringInc)
+    {
+      a = H[0];
+      b = H[1];
+      c = H[2];
+      d = H[3];
+      e = H[4];
+      f = H[5];
+      g = H[6];
+      h = H[7];
+
+      for (t = 0; t < numRounds; t += 1)
+      {
+        if (t < 16)
+        {
+          /* Bit of a hack - for 32-bit, the second term is ignored */
+          W[t] = new Int(message[t * binaryStringMult + i],
+              message[t * binaryStringMult + i + 1]);
+        }
+        else
+        {
+          W[t] = safeAdd_4(
+              gamma1(W[t - 2]), W[t - 7],
+              gamma0(W[t - 15]), W[t - 16]
+            );
+        }
+
+        T1 = safeAdd_5(h, sigma1(e), ch(e, f, g), K[t], W[t]);
+        T2 = safeAdd_2(sigma0(a), maj(a, b, c));
+        h = g;
+        g = f;
+        f = e;
+        e = safeAdd_2(d, T1);
+        d = c;
+        c = b;
+        b = a;
+        a = safeAdd_2(T1, T2);
+
+      }
+
+      H[0] = safeAdd_2(a, H[0]);
+      H[1] = safeAdd_2(b, H[1]);
+      H[2] = safeAdd_2(c, H[2]);
+      H[3] = safeAdd_2(d, H[3]);
+      H[4] = safeAdd_2(e, H[4]);
+      H[5] = safeAdd_2(f, H[5]);
+      H[6] = safeAdd_2(g, H[6]);
+      H[7] = safeAdd_2(h, H[7]);
+    }
+
+    if (("SHA-224" === variant) && (2 & SUPPORTED_ALGS))
+    {
+      retVal = [
+        H[0], H[1], H[2], H[3],
+        H[4], H[5], H[6]
+      ];
+    }
+    else if (("SHA-256" === variant) && (2 & SUPPORTED_ALGS))
+    {
+      retVal = H;
+    }
+    else if (("SHA-384" === variant) && (4 & SUPPORTED_ALGS))
+    {
+      retVal = [
+        H[0].highOrder, H[0].lowOrder,
+        H[1].highOrder, H[1].lowOrder,
+        H[2].highOrder, H[2].lowOrder,
+        H[3].highOrder, H[3].lowOrder,
+        H[4].highOrder, H[4].lowOrder,
+        H[5].highOrder, H[5].lowOrder
+      ];
+    }
+    else if (("SHA-512" === variant) && (4 & SUPPORTED_ALGS))
+    {
+      retVal = [
+        H[0].highOrder, H[0].lowOrder,
+        H[1].highOrder, H[1].lowOrder,
+        H[2].highOrder, H[2].lowOrder,
+        H[3].highOrder, H[3].lowOrder,
+        H[4].highOrder, H[4].lowOrder,
+        H[5].highOrder, H[5].lowOrder,
+        H[6].highOrder, H[6].lowOrder,
+        H[7].highOrder, H[7].lowOrder
+      ];
+    }
+    else /* This should never be reached */
+    {
+      throw "Unexpected error in SHA-2 implementation";
+    }
+
+    return retVal;
+  }
+
+  /**
+   * jsSHA is the workhorse of the library.  Instantiate it with the string to
+   * be hashed as the parameter
+   *
+   * @constructor
+   * @this {jsSHA}
+   * @param {string} srcString The string to be hashed
+   * @param {string} inputFormat The format of srcString, HEX, TEXT, or ASCII
+   * @param {string=} encoding The text encoding to use to encode the source
+   *   string
+   */
+  var jsSHA = function(srcString, inputFormat, encoding)
+  {
+    var strBinLen = 0, strToHash = [0], utfType = '', srcConvertRet = null;
+
+    utfType = encoding || "UTF8";
+
+    if (!(("UTF8" === utfType) || ("UTF16" === utfType)))
+    {
+      throw "encoding must be UTF8 or UTF16";
+    }
+
+    /* Convert the input string into the correct type */
+    if ("HEX" === inputFormat)
+    {
+      if (0 !== (srcString.length % 2))
+      {
+        throw "srcString of HEX type must be in byte increments";
+      }
+      srcConvertRet = hex2binb(srcString);
+      strBinLen = srcConvertRet["binLen"];
+      strToHash = srcConvertRet["value"];
+    }
+    else if (("ASCII" === inputFormat) || ("TEXT" === inputFormat))
+    {
+      srcConvertRet = str2binb(srcString, utfType);
+      strBinLen = srcConvertRet["binLen"];
+      strToHash = srcConvertRet["value"];
+    }
+    else if ("B64" === inputFormat)
+    {
+      srcConvertRet = b642binb(srcString);
+      strBinLen = srcConvertRet["binLen"];
+      strToHash = srcConvertRet["value"];
+    }
+    else
+    {
+      throw "inputFormat must be HEX, TEXT, ASCII, or B64";
+    }
+
+    /**
+     * Returns the desired SHA hash of the string specified at instantiation
+     * using the specified parameters
+     *
+     * @expose
+     * @param {string} variant The desired SHA variant (SHA-1, SHA-224,
+     *   SHA-256, SHA-384, or SHA-512)
+     * @param {string} format The desired output formatting (B64 or HEX)
+     * @param {number=} numRounds The number of rounds of hashing to be
+     *   executed
+     * @param {{outputUpper : boolean, b64Pad : string}=} outputFormatOpts
+     *   Hash list of output formatting options
+     * @return {string} The string representation of the hash in the format
+     *   specified
+     */
+    this.getHash = function(variant, format, numRounds, outputFormatOpts)
+    {
+      var formatFunc = null, message = strToHash.slice(),
+        messageBinLen = strBinLen, i;
+
+      /* Need to do argument patching since both numRounds and
+         outputFormatOpts are optional */
+      if (3 === arguments.length)
+      {
+        if ("number" !== typeof numRounds)
+        {
+          outputFormatOpts = numRounds;
+          numRounds = 1;
+        }
+      }
+      else if (2 === arguments.length)
+      {
+        numRounds = 1;
+      }
+
+      /* Validate the numRounds argument */
+      if ((numRounds !== parseInt(numRounds, 10)) || (1 > numRounds))
+      {
+        throw "numRounds must a integer >= 1";
+      }
+
+      /* Validate the output format selection */
+      switch (format)
+      {
+      case "HEX":
+        formatFunc = binb2hex;
+        break;
+      case "B64":
+        formatFunc = binb2b64;
+        break;
+      default:
+        throw "format must be HEX or B64";
+      }
+
+      if (("SHA-1" === variant) && (1 & SUPPORTED_ALGS))
+      {
+        for (i = 0; i < numRounds; i++)
+        {
+          message = coreSHA1(message, messageBinLen);
+          messageBinLen = 160;
+        }
+      }
+      else if (("SHA-224" === variant) && (2 & SUPPORTED_ALGS))
+      {
+        for (i = 0; i < numRounds; i++)
+        {
+          message = coreSHA2(message, messageBinLen, variant);
+          messageBinLen = 224;
+        }
+      }
+      else if (("SHA-256" === variant) && (2 & SUPPORTED_ALGS))
+      {
+        for (i = 0; i < numRounds; i++)
+        {
+          message = coreSHA2(message, messageBinLen, variant);
+          messageBinLen = 256;
+        }
+      }
+      else if (("SHA-384" === variant) && (4 & SUPPORTED_ALGS))
+      {
+        for (i = 0; i < numRounds; i++)
+        {
+          message = coreSHA2(message, messageBinLen, variant);
+          messageBinLen = 384;
+        }
+      }
+      else if (("SHA-512" === variant) && (4 & SUPPORTED_ALGS))
+      {
+        for (i = 0; i < numRounds; i++)
+        {
+          message = coreSHA2(message, messageBinLen, variant);
+          messageBinLen = 512;
+        }
+      }
+      else
+      {
+        throw "Chosen SHA variant is not supported";
+      }
+
+      return formatFunc(message, getOutputOpts(outputFormatOpts));
+    };
+
+    /**
+     * Returns the desired HMAC of the string specified at instantiation
+     * using the key and variant parameter
+     *
+     * @expose
+     * @param {string} key The key used to calculate the HMAC
+     * @param {string} inputFormat The format of key, HEX or TEXT or ASCII
+     * @param {string} variant The desired SHA variant (SHA-1, SHA-224,
+     *   SHA-256, SHA-384, or SHA-512)
+     * @param {string} outputFormat The desired output formatting
+     *   (B64 or HEX)
+     * @param {{outputUpper : boolean, b64Pad : string}=} outputFormatOpts
+     *   associative array of output formatting options
+     * @return {string} The string representation of the hash in the format
+     *   specified
+     */
+    this.getHMAC = function(key, inputFormat, variant, outputFormat,
+      outputFormatOpts)
+    {
+      var formatFunc, keyToUse, blockByteSize, blockBitSize, i,
+        retVal, lastArrayIndex, keyBinLen, hashBitSize,
+        keyWithIPad = [], keyWithOPad = [], keyConvertRet = null;
+
+      /* Validate the output format selection */
+      switch (outputFormat)
+      {
+      case "HEX":
+        formatFunc = binb2hex;
+        break;
+      case "B64":
+        formatFunc = binb2b64;
+        break;
+      default:
+        throw "outputFormat must be HEX or B64";
+      }
+
+      /* Validate the hash variant selection and set needed variables */
+      if (("SHA-1" === variant) && (1 & SUPPORTED_ALGS))
+      {
+        blockByteSize = 64;
+        hashBitSize = 160;
+      }
+      else if (("SHA-224" === variant) && (2 & SUPPORTED_ALGS))
+      {
+        blockByteSize = 64;
+        hashBitSize = 224;
+      }
+      else if (("SHA-256" === variant) && (2 & SUPPORTED_ALGS))
+      {
+        blockByteSize = 64;
+        hashBitSize = 256;
+      }
+      else if (("SHA-384" === variant) && (4 & SUPPORTED_ALGS))
+      {
+        blockByteSize = 128;
+        hashBitSize = 384;
+      }
+      else if (("SHA-512" === variant) && (4 & SUPPORTED_ALGS))
+      {
+        blockByteSize = 128;
+        hashBitSize = 512;
+      }
+      else
+      {
+        throw "Chosen SHA variant is not supported";
+      }
+
+      /* Validate input format selection */
+      if ("HEX" === inputFormat)
+      {
+        keyConvertRet = hex2binb(key);
+        keyBinLen = keyConvertRet["binLen"];
+        keyToUse = keyConvertRet["value"];
+      }
+      else if (("ASCII" === inputFormat) || ("TEXT" === inputFormat))
+      {
+        keyConvertRet = str2binb(key, utfType);
+        keyBinLen = keyConvertRet["binLen"];
+        keyToUse = keyConvertRet["value"];
+      }
+      else if ("B64" === inputFormat)
+      {
+        keyConvertRet = b642binb(key);
+        keyBinLen = keyConvertRet["binLen"];
+        keyToUse = keyConvertRet["value"];
+      }
+      else
+      {
+        throw "inputFormat must be HEX, TEXT, ASCII, or B64";
+      }
+
+      /* These are used multiple times, calculate and store them */
+      blockBitSize = blockByteSize * 8;
+      lastArrayIndex = (blockByteSize / 4) - 1;
+
+      /* Figure out what to do with the key based on its size relative to
+       * the hash's block size */
+      if (blockByteSize < (keyBinLen / 8))
+      {
+        if (("SHA-1" === variant) && (1 & SUPPORTED_ALGS))
+        {
+          keyToUse = coreSHA1(keyToUse, keyBinLen);
+        }
+        else if (6 & SUPPORTED_ALGS)
+        {
+          keyToUse = coreSHA2(keyToUse, keyBinLen, variant);
+        }
+        else
+        {
+          throw "Unexpected error in HMAC implementation";
+        }
+        /* For all variants, the block size is bigger than the output
+         * size so there will never be a useful byte at the end of the
+         * string */
+        keyToUse[lastArrayIndex] &= 0xFFFFFF00;
+      }
+      else if (blockByteSize > (keyBinLen / 8))
+      {
+        /* If the blockByteSize is greater than the key length, there
+         * will always be at LEAST one "useless" byte at the end of the
+         * string */
+        keyToUse[lastArrayIndex] &= 0xFFFFFF00;
+      }
+
+      /* Create ipad and opad */
+      for (i = 0; i <= lastArrayIndex; i += 1)
+      {
+        keyWithIPad[i] = keyToUse[i] ^ 0x36363636;
+        keyWithOPad[i] = keyToUse[i] ^ 0x5C5C5C5C;
+      }
+
+      /* Calculate the HMAC */
+      if (("SHA-1" === variant) && (1 & SUPPORTED_ALGS))
+      {
+        retVal = coreSHA1(
+          keyWithOPad.concat(
+            coreSHA1(
+              keyWithIPad.concat(strToHash),
+              blockBitSize + strBinLen
+            )
+          ),
+          blockBitSize + hashBitSize);
+      }
+      else if (6 & SUPPORTED_ALGS)
+      {
+        retVal = coreSHA2(
+          keyWithOPad.concat(
+            coreSHA2(
+              keyWithIPad.concat(strToHash),
+              blockBitSize + strBinLen,
+              variant
+            )
+          ),
+          blockBitSize + hashBitSize, variant);
+      }
+      else
+      {
+        throw "Unexpected error in HMAC implementation";
+      }
+
+      return formatFunc(retVal, getOutputOpts(outputFormatOpts));
+    };
+  };
+
+  if (("function" === typeof define) && (typeof define["amd"])) /* AMD Support */
+  {
+    define(function()
+    {
+      return jsSHA;
+    });
+  } else if ("undefined" !== typeof exports) /* Node Support */
+  {
+    if (("undefined" !== typeof module) && module["exports"])
+    {
+      module["exports"] = exports = jsSHA;
+    }
+    else {
+      exports = jsSHA;
+    }
+  } else { /* Browsers and Web Workers*/
+    global["jsSHA"] = jsSHA;
+  }
+}(this));
+/***
+Copyright (c) 2013-2016, callstats.io
+All rights reserved.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+***/
+
+/*! callstats.js  version = 3.17.7 2017-02-15 */
+!function a(b,c,d){function e(g,h){if(!c[g]){if(!b[g]){var i="function"==typeof require&&require;if(!h&&i)return i(g,!0);if(f)return f(g,!0);var j=new Error("Cannot find module '"+g+"'");throw j.code="MODULE_NOT_FOUND",j}var k=c[g]={exports:{}};b[g][0].call(k.exports,function(a){var c=b[g][1][a];return e(c?c:a)},k,k.exports,a,b,c,d)}return c[g].exports}for(var f="function"==typeof require&&require,g=0;g<d.length;g++)e(d[g]);return e}({1:[function(a,b,c){(function(b){"use strict";!function(){function c(){function b(){var a=(Math.random()+1).toString(36);return a.substring(2,a.length)}function c(){return window.performance.now?window.performance.now()+window.performance.timing.navigationStart:Date.now()}function d(){var a=c();return a+Wa.currentOffset}function e(){return window.performance.now?window.performance.now():null}function f(){"function"==typeof navigator.getBattery&&navigator.getBattery().then(function(a){pa=a})}function g(){if(pa)return pa.level}function h(){if(pa)return pa.charging}function i(a,b){return a.sort().toString()===b.sort().toString()}function j(a){navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices&&navigator.mediaDevices.enumerateDevices().then(function(b){oa?i(oa,b)||(oa=b,Sb(a)):(oa=b,Sb(a)),setTimeout(function(){j(a)},Ga)}).catch(function(){setTimeout(function(){j(a)},Ga)})}function k(){Ca||window.addEventListener("beforeunload",function(a){var b;for(b in Ua)Ua.hasOwnProperty(b)&&Pb(db.userLeft,null,b,Ua[b].ucID,null,null,null);return"Are you sure you want to close the call?"})}function l(a,b,c,d,f){var g=ac(c,d),h=null;g&&(h=e(),Pb(db.mediaPlaybackStartEvent,b,c,a,{ssrc:f,highResTs:h},g,null))}function m(a,b,c,d,f){var g=ac(c,d),h=null;g&&(h=e(),Pb(db.mediaSuspendedEvent,b,c,a,{ssrc:f,highResTs:h},g,null))}function n(a,b,c,d,e){var f=document.getElementById(c);if(f){var g=Ua[b].ucID;f.oncanplay=function(){l(g,a,b,d,e)},f.onsuspend=function(){m(g,a,b,d,e)}}}function o(a){var b=Ra.codebase,c=!1;if(null===a)c=!1;else if(b===wb.firefox){var d=typeof mozRTCPeerConnection,e=typeof RTCPeerConnection;"undefined"!==d&&a instanceof mozRTCPeerConnection?c=!0:"undefined"!==e&&a instanceof RTCPeerConnection&&(c=!0)}else null!==bb&&a instanceof bb&&(c=!0),"function"!=typeof a&&b!==wb.edge||(c=!0),void 0!==typeof a.createOffer&&(c=!0);return c}function p(a,b){var c;return a&&(b===wb.chrome?(c=a.googLocalAddress,c.concat(":",a.googRemoteAddress)):b===wb.firefox&&(c=a.localAddr,c.concat(":",a.remoteAddr))),Wb(c)}function q(){var a;return a=navigator.onLine===!0?"online":"offline"}function r(a,b,c,d){var e=null;c.ssrcMap.hasOwnProperty(a.data.ssrc)&&(c.ssrcMap[a.data.ssrc].mediaType=d,b===wb.chrome&&(e=a.data.googCodecName),c.ssrcMap[a.data.ssrc].codec=e,a.data.codecImplementationName&&(c.ssrcMap[a.data.ssrc].codecImplementationName=a.data.codecImplementationName))}function s(a,b){var c=xb.unknown;if(a&&a.data&&void 0!==a.data.mediaType)c=a.data.mediaType;else if(b===wb.chrome)void 0!==a&&(void 0!==a.data.googFrameRateReceived||void 0!==a.data.googFrameRateSent?c=xb.video:void 0===a.data.audioInputLevel&&void 0===a.data.audioOutputLevel||(c=xb.audio));else{if(b!==wb.firefox)return;void 0!==a&&void 0!==a.data.framerateMean&&(c=xb.video)}return c}function t(a,b){var c;return b===wb.chrome?void 0!==a.data.googFrameRateOutput?c=parseInt(a.data.googFrameRateOutput,10):void 0!==a.data.googFrameRateDecoded?c=parseInt(a.data.googFrameRateDecoded,10):void 0!==a.data.googFrameRateReceived?c=parseInt(a.data.googFrameRateReceived,10):void 0!==a.data.googFrameRateSent&&(c=parseInt(a.data.googFrameRateSent,10)):b===wb.firefox&&void 0!==a.data.framerateMean&&(c=parseInt(a.data.framerateMean,10)),void 0!==c&&(c=isNaN(c)||c<0?null:c),c}function u(a,b){var c,d,e,f="unavailable";return c=t(a,b),e=w(a,b),d=v(a,b),void 0!==c&&void 0!==e&&void 0!==d&&e>0&&d>0&&(f=e.concat("x",d,"@",c)),f}function v(a,b){var c;return b===wb.chrome?void 0!==a.data.googFrameHeightReceived?c=a.data.googFrameHeightReceived:void 0!==a.data.googFrameHeightSent&&(c=a.data.googFrameHeightSent):b===wb.firefox,c}function w(a,b){var c;return b===wb.chrome?void 0!==a.data.googFrameWidthReceived?c=a.data.googFrameWidthReceived:void 0!==a.data.googFrameWidthSent&&(c=a.data.googFrameWidthSent):b===wb.firefox,c}function x(a){var b;return b=isNaN(a)||a<0?null:a}function y(a,b){var c;if(b===wb.chrome){if(void 0!==a&&void 0!==a.data.googRtt)return c=x(parseInt(a.data.googRtt,10))}else if(b===wb.firefox){if(void 0!==a&&void 0!==a.data.mozRtt)return c=x(parseInt(a.data.mozRtt,10))}else if(b===wb.edge&&a&&a.data.roundTripTime)return c=x(parseInt(a.data.roundTripTime,10))}function z(a){var b=isNaN(a)?null:a;return b}function A(a,b){var c;if(b===wb.chrome){if(void 0!==a&&void 0!==a.data.googJitterReceived)return c=z(parseInt(a.data.googJitterReceived,10)),c&&(c/=1e3),c}else if(b===wb.firefox&&void 0!==a&&void 0!==a.data.jitter)return c=z(parseInt(a.data.jitter,10))}function B(a,b){if(b.sort(),b.length>0){var c=a/100*b.length;c=Math.ceil(c);var d=b[c-1];return d}}function C(a){var b,c;return a&&a.length>0&&(b=a.reduce(function(a,b){return a+b}),c=b/a.length),c}function D(a,b,c){var d;return b===xb.audio?a<c.audio.gThreshold?d=mb.excellent:a>c.audio.gThreshold&&a<c.audio.rThreshold?d=mb.fair:a>c.audio.rThreshold&&(d=mb.bad):b===xb.video&&(a<c.video.gThreshold?d=mb.excellent:a>c.video.gThreshold&&a<c.video.rThreshold?d=mb.fair:a>c.video.rThreshold&&(d=mb.bad)),d}function E(a,b,c){var d;return b===xb.audio?a>c.audio.gThreshold?d=mb.excellent:a>c.audio.rThreshold&&a<c.audio.gThreshold?d=mb.fair:a<c.audio.rThreshold&&(d=mb.bad):b===xb.video&&(a>c.video.gThreshold?d=mb.excellent:a>c.video.rThreshold&&a<c.video.gThreshold?d=mb.fair:a<c.video.rThreshold&&(d=mb.bad)),d}function F(){var a,b,c=0,d=0;for(a=0;a<arguments.length;a++)void 0!==arguments[a]&&null!==arguments[a]&&(c+=arguments[a],d++);return d>0&&(c/=d,c=Math.floor(c),c===mb.excellent?b=nb.excellent:c===mb.fair?b=nb.fair:c===mb.bad&&(b=nb.bad)),b}function G(a,b,c){var d,e,f,g,h,i,j,k,l=[];if(void 0!==a.lastStatsSent&&void 0!==a.lastStatsSent.statistics.Transport)for(f=a.lastStatsSent.statistics.Transport,g=a.latestEventSent,h=void 0,d=0;d<b.length;d++){for(h=void 0,e=0;e<f.length;e++)if(b[d].hash===f[e].hash){h=f[e];break}void 0!==h&&(i=parseInt(h.bytesReceived,10),j=parseInt(h.bytesSent,10),k=c-g,k>0&&(b[d].csioReceivedBwKbps=8*(parseInt(b[d].bytesReceived,10)-i)/k,b[d].csioSentBwKbps=8*(parseInt(b[d].bytesSent,10)-j)/k,b[d].csioIntBytesReceived=parseInt(b[d].bytesReceived,10)-i,b[d].csioIntBytesSent=parseInt(b[d].bytesSent,10)-j,void 0!==h.packetsSent&&void 0!==b[d].packetsSent&&(b[d].csioSentPacketRate=(parseInt(b[d].packetsSent,10)-parseInt(h.packetsSent,10))/(k/1e3),b[d].csioIntPacketsSent=parseInt(b[d].packetsSent,10)-parseInt(h.packetsSent,10)),void 0!==h.packetsReceived&&void 0!==b[d].packetsReceived&&(b[d].csioReceivedPacketRate=(parseInt(b[d].packetsReceived,10)-parseInt(h.packetsReceived,10))/(k/1e3),b[d].csioIntPacketsReceived=parseInt(b[d].packetsReceived,10)-parseInt(h.packetsReceived,10))),l.push(b[d]))}return l}function H(a,b,c,d){var e=[];return c===wb.firefox?e=null:c===wb.chrome&&(e=G(a,b,d)),e}function I(a){if(a=z(a),null!==a){var b=a<0?null:a;return b}}function J(a,b,c,d,e,f,g){return void 0===a[c]&&(a[c]={}),void 0===a[c].streams&&(a[c].streams={}),void 0===a[c].streams[b]&&(a[c].streams[b]={}),void 0===a[c].streams[b][e]&&(a[c].streams[b][e]={}),void 0===a[c].streams[b][e][d]&&(a[c].streams[b][e][d]={}),void 0===a[c].streams[b][e][d][f]&&(g?a[c].streams[b][e][d][f]=[]:a[c].streams[b][e][d][f]=0),a}function K(a,b,c,d,e,f,g){var h,i,j,k,l,m,n,o,p,q,x,A,G,H,K,L,N,O,P,Q,R,S,T,U,V,W,X,Y,Z=null,$=null,_=null,aa=b.reportType,ba=null,ca=null,da=null,ea=null,fa=null,ga=null,ha=null,ia=null,ja=null,ka=b.data,la=0,ma=M(c.streams,b.ssrc,"outbound",aa);ma?(h=z(parseInt(ma.data.bytesSent,10)),i=a.lastStatsSent.apiTS,K=z(parseInt(ma.data.packetsSent,10)),N=z(parseInt(ma.data.packetsLost,10)),O=z(parseInt(ma.data.discardedPackets,10))):(h=0,i=e,N=0,K=0,O=0),k=e,A=k-i,m=s(b,d),n=u(b,d),o=t(b,d),p=w(b,d),T=v(b,d),r(b,d,a,m),l=y(b,d),j=z(parseInt(ka.bytesSent,10)),null!==j&&null!==h&&j<h&&(h=0,Gb(ya,za,"log",{msg:"getstats: curBytesSent < prevBytesSent counter reset",conferenceID:f,ucID:g})),void 0!==ka.droppedFrames&&(P=I(parseInt(ka.droppedFrames,10)),null!==P&&null!==O&&P<O&&(O=0),null!==P&&null!==O&&(Q=P-O)),L=I(parseInt(ka.packetsLost,10)),null!==L&&null!==N&&($=L-N),H=I(parseInt(ka.packetsSent,10)),null!==H&&null!==K&&(G=H-K),null!==L&&null!==H&&L>0&&(la=L/H*100),void 0!==$&&void 0!==G&&G+$>0&&(_=$/(G+$)),A>0&&(null!==j&&null!==h&&(Z=8*(j-h)/A,H&&0!==H&&(U=j/H)),void 0!==G&&(ja=G/(A/1e3)));var na=b.ssrc;a=J(a,na,"rttInfo",aa,"outbound","rttArray",!0),a=J(a,na,"fractionalLossInfo",aa,"outbound","fractionalLossArray",!0),a=J(a,na,"timeElapse",aa,"outbound","totalTimeMs",!1),a=J(a,na,"frameWidthInfo",aa,"outbound","frameWidthArray",!0),a=J(a,na,"frameRateInfo",aa,"outbound","frameRateArray",!0),a=J(a,na,"frameHeightInfo",aa,"outbound","frameHeightArray",!0),void 0!==l&&null!==l&&a.rttInfo.streams[na].outbound[aa].rttArray.push(parseInt(l,10)),void 0!==_&&null!==_&&a.fractionalLossInfo.streams[na].outbound[aa].fractionalLossArray.push(_),void 0!==o&&null!==o&&a.frameRateInfo.streams[na].outbound[aa].frameRateArray.push(parseInt(o,10)),void 0!==p&&null!==p&&a.frameWidthInfo.streams[na].outbound[aa].frameWidthArray.push(parseInt(p,10)),void 0!==T&&null!==T&&a.frameHeightInfo.streams[na].outbound[aa].frameHeightArray.push(parseInt(T,10)),ba=B(95,a.rttInfo.streams[na].outbound[aa].rttArray),ea=B(95,a.fractionalLossInfo.streams[na].outbound[aa].fractionalLossArray),V=C(a.frameRateInfo.streams[na].outbound[aa].frameRateArray),W=B(50,a.frameHeightInfo.streams[na].outbound[aa].frameHeightArray),X=C(a.frameHeightInfo.streams[na].outbound[aa].frameHeightArray),Y=C(a.rttInfo.streams[na].outbound[aa].rttArray),null!==j&&null!==h&&j>h&&(a.timeElapse.streams[na].outbound[aa].totalTimeMs=a.timeElapse.streams[na].outbound[aa].totalTimeMs+A),a.timeElapse.streams[na].outbound[aa].totalTimeMs>0&&null!==j&&(ia=8*j/a.timeElapse.streams[na].outbound[aa].totalTimeMs);var oa={csioIntMs:A,csioIntFL:_,csioIntPR:ja,csioIntBRKbps:Z,csioMediaType:m,csioSig2Latency:ba,csioAvgBRKbps:ia,csioTimeElapseMs:a.timeElapse.streams[na].outbound[aa].totalTimeMs,csioRes:n,csioPercentileFl:ea,csioIntFramesDropped:Q,csioAvgRtt:Y,csioAvgFrameRate:V,csioMedianFrameHeight:W,csioAvgFrameHeight:X,csioAvgPacketSize:U,csioPktLossPercentage:la};for(R in ka)ka.hasOwnProperty(R)&&(oa[R]=ka[R]);return m===xb.audio?(S=ba+40,ca=D(S,m,vb),da=E(Z,m,rb),q=F(ca,da),oa.csioMark=q,oa.csioeM=S):m===xb.video&&(oa.csioPercentileFrameWidth=B(95,a.frameWidthInfo.streams[na].outbound[aa].frameWidthArray),oa.csioPercentileFrameRate=B(95,a.frameRateInfo.streams[na].outbound[aa].frameRateArray),x=parseInt(a.rttInfo.streams[na].outbound[aa].frameRate,10),fa=E(o/x,m,sb),ga=D(l,m,tb),ha=E(Z,m,rb),q=F(fa,ga,ha),a.rttInfo.streams[na].outbound[aa].frameRate=o,oa.csioMark=q),oa}function L(a,b,c,d,e,f,g){var h,i,j,k,l,m,n,o,p,q,x,G,H,K,L,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,$,_,aa,ba,ca,da=null,ea=null,fa=b.reportType,ga=null,ha=null,ia=null,ja=null,ka=null,la=null,ma=null,na=null,oa=null,pa=b.data,qa=0,ra=M(c.streams,b.ssrc,"inbound",fa);ra?(h=z(parseInt(ra.data.bytesReceived,10)),l=z(parseInt(ra.data.packetsLost,10)),R=z(parseInt(ra.data.packetsReceived,10)),i=a.lastStatsSent.apiTS,T=z(parseInt(ra.data.discardedPackets,10))):(h=0,i=e,l=0,R=0,T=0),o=s(b,d),p=u(b,d),x=t(b,d),q=A(b,d),X=w(b,d),n=y(b,d),Y=v(b,d),r(b,d,a,o),j=z(parseInt(pa.bytesReceived,10)),null!==j&&null!==h&&j<h&&(h=0,l=0,R=0,Gb(ya,za,"log",{msg:"getstats: curBytesReceived < prevBytesReceived counter reset",conferenceID:f,ucID:g})),m=I(parseInt(pa.packetsLost,10)),null!==m&&null!==l&&(ea=m-l),k=e,void 0!==pa.discardedPackets&&(S=I(parseInt(pa.discardedPackets,10)),null!==S&&null!==T&&S<T&&(T=0),null!==S&&null!==T&&(U=S-T)),Q=I(parseInt(pa.packetsReceived,10)),G=Q-R,void 0!==ea&&null!==G&&G+ea>0&&(ha=ea/(G+ea)),null!==m&&null!==Q&&m>0&&(qa=m/Q*100),P=k-i,P>0&&(null!==j&&null!==h&&(da=8*(j-h)/P,Q&&0!==Q&&(Z=j/Q)),null!==G&&(ga=G/(P/1e3)));var sa=b.ssrc;a=J(a,sa,"rttInfo",fa,"inbound","rttArray",!0),a=J(a,sa,"timeElapse",fa,"inbound","totalTimeMs",!1),a=J(a,sa,"jitterInfo",fa,"inbound","jitterArray",!0),a=J(a,sa,"fractionalLossInfo",fa,"inbound","fractionalLossArray",!0),a=J(a,sa,"frameWidthInfo",fa,"inbound","frameWidthArray",!0),a=J(a,sa,"frameRateInfo",fa,"inbound","frameRateArray",!0),a=J(a,sa,"frameHeightInfo",fa,"inbound","frameHeightArray",!0),void 0!==n&&null!==n&&a.rttInfo.streams[sa].inbound[fa].rttArray.push(parseInt(n,10)),void 0!==q&&null!==q&&a.jitterInfo.streams[sa].inbound[fa].jitterArray.push(parseInt(q,10)),void 0!==ha&&null!==ha&&a.fractionalLossInfo.streams[sa].inbound[fa].fractionalLossArray.push(ha),void 0!==x&&null!==x&&a.frameRateInfo.streams[sa].inbound[fa].frameRateArray.push(parseInt(x,10)),void 0!==X&&null!==X&&a.frameWidthInfo.streams[sa].inbound[fa].frameWidthArray.push(parseInt(X,10)),void 0!==Y&&null!==Y&&a.frameHeightInfo.streams[sa].inbound[fa].frameHeightArray.push(parseInt(Y,10)),ia=B(95,a.rttInfo.streams[sa].inbound[fa].rttArray),ja=B(95,a.jitterInfo.streams[sa].inbound[fa].jitterArray),ka=B(95,a.fractionalLossInfo.streams[sa].inbound[fa].fractionalLossArray),$=C(a.frameRateInfo.streams[sa].inbound[fa].frameRateArray),_=B(50,a.frameHeightInfo.streams[sa].inbound[fa].frameHeightArray),aa=C(a.frameHeightInfo.streams[sa].inbound[fa].frameHeightArray),ba=C(a.jitterInfo.streams[sa].inbound[fa].jitterArray),ca=C(a.rttInfo.streams[sa].inbound[fa].rttArray),null!==j&&null!==h&&j>h&&(a.timeElapse.streams[sa].inbound[fa].totalTimeMs=a.timeElapse.streams[sa].inbound[fa].totalTimeMs+P),null!==j&&a.timeElapse.streams[sa].inbound[fa].totalTimeMs>0&&(oa=8*j/a.timeElapse.streams[sa].inbound[fa].totalTimeMs);var ta={csioIntMs:P,csioIntFL:ha,csioIntPR:ga,csioIntBRKbps:da,csioSig2Latency:ia,csioAvgBRKbps:oa,csioMediaType:o,csioTimeElapseMs:a.timeElapse.streams[sa].inbound[fa].totalTimeMs,csioIntPktRcv:G,csioIntPktLoss:ea,csioPercentileJitter:ja,csioRes:p,csioPercentileFl:ka,csioIntPktDiscarded:U,csioAvgJitter:ba,csioAvgRtt:ca,csioAvgFrameRate:$,csioMedianFrameHeight:_,csioAvgFrameHeight:aa,csioAvgPacketSize:Z,csioPktLossPercentage:qa};for(V in pa)pa.hasOwnProperty(V)&&(ta[V]=pa[V]);return o===xb.audio?(W=ia+40,la=D(W,o,vb),ma=D(ha,o,ub),na=E(da,o,rb),H=F(la,ma,na),ta.csioMark=H,ta.csioeM=W):o===xb.video&&(ta.csioPercentileFrameRate=B(95,a.frameRateInfo.streams[sa].inbound[fa].frameRateArray),ta.csioPercentileFrameWidth=B(95,a.frameWidthInfo.streams[sa].inbound[fa].frameWidthArray),K=a.rttInfo.streams[sa].inbound[fa].frameRate,L=E(x/K,o,sb),N=D(n,o,tb),O=E(da,o,rb),H=F(L,N,O),a.rttInfo.streams[sa].inbound[fa].frameRate=x,ta.csioMark=H),ta}function M(a,b,c,d){var e=a.filter(function(a){return a.ssrc===b&&a.streamType===c&&a.reportType===d});return e.length>0?e[0]:null}function N(a,b,c,d,e,f){var g={streams:[]};g.fabricState=a.pcState,g.connectionState=q();var h=null;return h=a.lastStatsSent?a.lastStatsSent.statistics:{streams:[]},b.streams.forEach(function(b){var i={cname:b.cname,usage:b.usage,msid:b.msid,userID:b.userID,associatedVideoTag:b.associatedVideoTag,ssrc:b.ssrc,streamType:b.streamType,reportType:b.reportType};"inbound"===b.streamType?i.data=L(a,b,h,c,d,e,f):i.data=K(a,b,h,c,d,e,f),g.streams.push(i)}),g}function O(a){var b,c,d;for(b in a.streams)if(a.streams.hasOwnProperty(b)){if(a.streams[b].inbound)for(d in a.streams[b].inbound)a.streams[b].inbound.hasOwnProperty(d)&&(c=a.streams[b].inbound[d].mark,c===nb.bad?a.streams[b].inbound[d].mark=2:c===nb.fair?a.streams[b].inbound[d].mark=1:a.streams[b].inbound[d].mark=0);if(a.streams[b].outbound)for(d in a.streams[b].outbound)a.streams[b].outbound.hasOwnProperty(d)&&(c=a.streams[b].outbound[d].mark,c===nb.bad?a.streams[b].outbound[d].mark=2:c===nb.fair?a.streams[b].outbound[d].mark=1:a.streams[b].outbound[d].mark=0)}return a}function P(a,b,c){var d,e,f;for(d=0;d<a.length;d++)e=b[a[d].localCandidateId],f=c[a[d].remoteCandidateId],a[d].localAddr=e.ipAddress+":"+e.portNumber,a[d].remoteAddr=f.ipAddress+":"+f.portNumber,a[d].localAddrType=e.candidateType,a[d].remoteAddrType=f.candidateType,a[d].transportType=e.transport;return a}function Q(a){var b={},c=Rc.getConferenceURL();return a.connectionState&&(b.connectionState=a.connectionState),a.fabricState&&(b.fabricState=a.fabricState),c&&(b.conferenceURL=c),b.streams={},a.streams.forEach(function(a){var c={cname:a.cname,ssrc:a.ssrc,msid:a.msid,remoteUserID:a.userID,usageLabel:a.usage,associatedVideoTag:a.associatedVideoTag};a.data.hasOwnProperty("csioIntFL")&&(c.fractionLoss=a.data.csioIntFL),a.data.hasOwnProperty("csioIntBRKbps")&&(c.bitrate=a.data.csioIntBRKbps),a.data.hasOwnProperty("csioMark")&&(c.quality=a.data.csioMark),a.data.hasOwnProperty("csioMediaType")&&(c.mediaType=a.data.csioMediaType),a.data.hasOwnProperty("googRtt")&&(c.rtt=a.data.googRtt),a.data.hasOwnProperty("mozRtt")&&(c.rtt=a.data.mozRtt),a.data.hasOwnProperty("roundTripTime")&&(c.rtt=a.data.roundTripTime),a.data.hasOwnProperty("jitter")&&(c.jitter=a.data.jitter),a.data.hasOwnProperty("googJitterReceived")&&(c.jitter=a.data.googJitterReceived),a.data.hasOwnProperty("audioOutputLevel")&&(c.audioOutputLevel=a.data.audioOutputLevel),a.data.hasOwnProperty("audioInputLevel")&&(c.audioInputLevel=a.data.audioInputLevel),a.data.hasOwnProperty("csioAvgRtt")&&(c.averageRTT=a.data.csioAvgRtt),a.data.hasOwnProperty("csioAvgJitter")&&(c.averageJitter=a.data.csioAvgJitter),a.data.hasOwnProperty("csioPktLossPercentage")&&(c.packetLossPercentage=a.data.csioPktLossPercentage),b.streams[a.ssrc]=c}),b}function R(a,b,c,e,f,g){var h=d();a.hasOwnProperty("token")&&a.hasOwnProperty("ucID")&&!Xa?(ia(eb.processedStats,a,g),b.latestEventSent=h,b.lastFabricState=b.pcState):(a.clockUnsynced=Xa,Na.cacheEvent({channel:eb.processedStats,data:a}),a.hasOwnProperty("token")||Pa.sendAuthenticationRequest(ya,f))}function S(a,b,e,f,i,j,k){function l(l){var m=d(),n=c();void 0===j.lastRawStatsSentInterval||null===j.lastRawStatsSentInterval?j.lastRawStatsSentInterval=n-j.statsPollingStart:j.lastRawStatsSentInterval=n-j.rawstatsTS+j.lastRawStatsSentInterval,void 0===j.lastProcessedStatsSentInterval||null===j.lastProcessedStatsSentInterval?j.lastProcessedStatsSentInterval=n-j.statsPollingStart:j.lastProcessedStatsSentInterval=n-j.rawstatsTS+j.lastProcessedStatsSentInterval,j.rawstatsTS=n;var o={},q=Ra.codebase;o.version=ua,o.appID=ya,o.conferenceID=encodeURIComponent(f),o.apiTS=m,o.timeShift=0,o.fabricState=j.pcState,o.pcID=j.pcHash,void 0!==i&&(o.ucID=i),Pa.authToken?o.token=Pa.authToken:Pa.sendAuthenticationRequest(ya,b),o.localID=encodeURIComponent(b),o.remoteID=encodeURIComponent(e),o.deviceID=Ba;var r,s,t,u,v,w,x,y={streams:[]},z=null,A=!1,B=!1,C={},D={};for(z=dc(l),r=0;r<z.length;++r)if(s=X(z[r]),t=U(JSON.parse(s),q),!Y(t))if(t.hasOwnProperty("Transport"))u="Transport",y.hasOwnProperty(u)||(y[u]=[]),q!==wb.firefox?(parseInt(t[u].bytesReceived,10)>0||parseInt(t[u].bytesSent,10)>0)&&(y[u].push(t[u]),"true"===t[u].googActiveConnection&&(o.activeConnectionIndex=y[u].length)):(y[u].push(t[u]),"true"===t[u].selected&&(o.activeConnectionIndex=y[u].length));else if(t.localCandidate)C[t.localCandidate.id]=t.localCandidate;else if(t.remoteCandidate)D[t.remoteCandidate.id]=t.remoteCandidate;else if(t.bwe)y.bwe=t.bwe;else{w=Mb(j,t.ssrc),void 0!==w&&w.localStartTime||(x=Ob(e,f,i,j,k,null),x&&(B=!0),w=Mb(j,t.ssrc)),w&&(v=w.remoteUserID),void 0===v&&(v=e);var E={userID:v,data:t.data,reportType:t.reportType,streamType:t.streamType,ssrc:t.ssrc};void 0!==w&&(E.cname=w.cname,E.msid=w.msid,E.associatedVideoTag=w.associatedVideoTag,E.usage=w.usageLabel),y.streams.push(E)}q===wb.firefox&&(y.Transport=P(y.Transport,C,D));var F;if(y.Transport)for(F=0;F<y.Transport.length;F++)y.Transport[F].hash=p(y.Transport[F],q);o.statistics=y,y.Transport&&(A=W(y.Transport,j)),A&&Kc(k,db.fabricTransportSwitch,f),j.pcState===ob.disrupted&&_(o);var G=N(j,y,q,m,f,i);if(y.Transport&&(G.Transport=H(j,y.Transport,q,m)),y.bwe&&(G.bwe=y.bwe),void 0===j.processedStatsTupleArray&&(j.processedStatsTupleArray=[]),qa){var I=Q(G);qa(I)}G.apiTS=m,G.batteryStatus={},G.batteryStatus.batteryLevel=g(),G.batteryStatus.isBatteryCharging=h(),G=O(G),j.processedStatsTupleArray.push(G),o.processedStatistics=j.processedStatsTupleArray,j.lastStatsSent=o;var J=ka(o),K=ka(o);delete J.processedStatistics,delete K.statistics,B&&Pb(db.ssrcMap,e,f,i,Nb(j),j.pcHash),(j.lastProcessedStatsSentInterval>=Fa||j.initialPhaseOver)&&(j.processedStatsTupleArray=[],R(K,j,f,e,b,a),j.lastProcessedStatsSentInterval=0)}return l}function T(a){var b;return pb.hasOwnProperty(a)?a===pb.createOffer||a===pb.createAnswer||a===pb.setRemoteDescription?b=qb.negotiationFailure:a===pb.setLocalDescription?b=qb.sdpError:a===pb.addIceCandidate?b=qb.sdpError:a===pb.getUserMedia?b=qb.mediaConfigError:a===pb.iceConnectionFailure?b=qb.iceFailure:a===pb.signalingError?b=qb.signalingError:(a===pb.applicationLog||pb.applicationError)&&(b=qb.applicationLog):b=Hb.invalidWebRTCFunctionName,b}function U(a,b){var c={};return b===wb.firefox?"inboundrtp"===a.type||"outboundrtp"===a.type?(c.ssrc=a.ssrc,c.streamType="inboundrtp"===a.type?"inbound":"outbound",c.data=a,c.mediaType=a.mediaType,c.reportType="true"===a.isRemote?"remote":"local"):"candidatepair"===a.type&&a.selected?c.Transport=a:"localcandidate"===a.type?c.localCandidate=a:"remotecandidate"===a.type&&(c.remoteCandidate=a):b===wb.chrome?"ssrc"===a.type?(c.reportType="local",a.bytesSent?c.streamType="outbound":c.streamType="inbound",c.ssrc=a.ssrc,c.data=a):"googCandidatePair"===a.type?c.Transport=a:"localcandidate"===a.type?c.localCandidate=a:"remotecandidate"===a.type?c.remoteCandidate=a:"VideoBwe"===a.type&&(c.bwe=a):b===wb.edge&&("inbound-rtp"===a.type||"outbound-rtp"===a.type?(c.ssrc=a.ssrc,c.streamType="inbound-rtp"===a.type?"inbound":"outbound",c.data=a,c.reportType="local"):"transport"===a.type?c.Transport=a:"localcandidate"===a.type?c.localCandidate=a:"remotecandidate"===a.type&&(c.remoteCandidate=a)),c}function V(a){var b="None";switch(a){case 0:b="TURN/TLS";break;case 1:b="TURN/TCP";break;case 2:b="TURN/UDP"}return b}function W(a,b){var c,d,e,f,g,h,i,j,k=!1,l="None",m=!1,n=function(a){var b=a.typePreference>>24;return"rtp"===a.protocol&&a.address===c&&(b>=0&&b<=2&&(l=V(b)),!0)};for(i=0;i<a.length;i++)if(j=a[i],navigator.mozGetUserMedia&&"candidatepair"===j.type&&"true"===j.selected?(m=!0,c=j.localAddr,d=j.remoteAddr,e=j.localAddrType,f=j.remoteAddrType,g=j.transportType):"googCandidatePair"===j.type&&"true"===j.googActiveConnection&&(m=!0,c=j.googLocalAddress,d=j.googRemoteAddress,e=j.googLocalCandidateType,f=j.googRemoteCandidateType,g=j.googTransportType),m){h=0===c.indexOf("["),b.iceCandidates.some(n);break}if(!m)return k;var o=b.transportData;return void 0!==o&&o.localAddr===c&&o.remoteAddr===d&&o.transportType===g||(b.transportData={localAddr:c,remoteAddr:d,localAddrType:e,remoteAddrType:f,transportType:g,ipv6:h,relayType:l},k=!0),k}function X(a){var b="";b+='{"Timestamp":"',b+=a.timestamp instanceof Date?a.timestamp.getTime().toString():a.timestamp,b+='",',a.type&&(b+='"type" : "'+a.type+'",');var c=0;if(a.names){var d=a.names();for(c=0;c<d.length;++c)b+='"',b+=d[c],b+='" : "',b+=a.stat(d[c]),b+='"',c+1!==d.length&&(b+=",")}else{var e=Object.keys(a).length;c=0;var f;for(f in a)a.hasOwnProperty(f)&&(c++,"timestamp"!==f&&(b+='"',b+=f,b+='" : "',b+=a[f],b+='"',c<e&&(b+=",")))}return b+="}"}function Y(a){if(null===a)return!0;if(a.length>0)return!1;if(0===a.length)return!0;var b;for(b in a)if(a.hasOwnProperty(b))return!1;return!0}function Z(a){return{magicKey:a,statsSubmissionInterval:Ia,endpoint:Ta,localUserIDObject:Aa}}function $(a,b,c){var d=Ua[a];void 0===d&&(Ua[a]={},Ua[a].participants=null,c&&(Ua[a].userJoinedSent=!0),b&&(Ua[a].refreshPresence=b))}function _(a){var b,c=a.statistics.outbound;if(void 0!==c)for(b in c)c.hasOwnProperty(b)&&(navigator.mozGetUserMedia&&c[b].data.mozRtt?c[b].data.mozRtt=0:c[b].data.googRtt&&(c[b].data.googRtt=0))}function aa(a){return clearInterval(a),null}function ba(){var a;for(a in Ua)Ua.hasOwnProperty(a)&&(Ua[a].refreshPresence=aa(Ua[a].refreshPresence),delete Ua[a].refreshPresence);ma()}function ca(a){var b=Ua[a],c=!1;return void 0!==b&&b.participants&&b.participants.length>0&&(c=!0),c}function da(a,b){var c=Ua[a],d=[];if(void 0===c)d.push(b),Ua[a].participants=d;else{var e=c.participants;null===e?(d.push(b),c.participants=d):e.push(b)}}function ea(a){var b=!1;if(!Ua[a])return{conferenceFinished:b,ucID:null};var c=Ua[a].ucID;return 0===Ua[a].participants.length&&(aa(Ua[a].refreshPresence),ma(),Na.sendCachedEvents(Pa),delete Ua[a],b=!0),{conferenceFinished:b,ucID:c}}function fa(a,b){Pb(db.userLeft,null,a,b,null,null,null),Za=aa(Za),ma(),Ya=Kb,Kb=null}function ga(){var a,b=function(a){return setInterval(function(){Tb(a)},Ka)};for(a in Ua)Ua.hasOwnProperty(a)&&(Tb(a),Ua[a].refreshPresence=b(a));na()}function ha(a){var b=JSON.parse(window.sessionStorage.getItem("csio_ucid_data"));return b[a]?b[a].ucID:null}function ia(a,b,c){var d=b.action;b.channel=a,Pa._isTokenValid(Pa.authToken,ya,za)?Xa&&zb.indexOf(d)===-1?(b.clockUnsynced=Xa,Na.cacheEvent({channel:a,data:b,callback:c})):(b.token=Pa.authToken,Sc(a,b,c),c&&c(gb.success,d+" sent to the backend.")):Pa.sendAuthenticationRequest(ya,za,function(e,f){e!==gb.success?(e===hb.authOngoing&&(b.clockUnsynced=Xa,Na.cacheEvent({channel:a,data:b,callback:c})),c&&e!==hb.authOngoing&&c(e,f)):e===gb.success&&"SDK authentication successful."===f&&(Xa&&zb.indexOf(d)===-1?(b.clockUnsynced=Xa,Na.cacheEvent({channel:a,data:b,callback:c})):(b.token=Pa.authToken,Sc(a,b,c),c&&c(gb.success,d+" sent to the backend.")))})}function ja(a){a&&a(hb.authOngoing,null)}function ka(a){if(null===a||"object"!=typeof a)return a;var b,c=new a.constructor;for(b in a)a.hasOwnProperty(b)&&(c[b]=ka(a[b]));return c}function la(){var a={};Object.keys(Ua).forEach(function(b){var c=Ua[b];if(!c)return!0;var d,e,f={ucID:c.ucID,userJoinedSent:c.userJoinedSent},g=[];if(c.participants){var h,i=c.participants;for(d=0;d<i.length;d++)e={},h=i[d],e={pcID:h.pcHash,pcState:h.pcState,iceConnectionState:h.iceConnectionState,iceGatheringState:h.iceGatheringState,iceCandidatesNumber:h.iceCandidates.length,remoteUserID:h.remoteUserID},g.push(e)}f.participants=g,a[b]=f});var b={authStatus:!!Pa.tokenData,clockSync:!Xa,stateMachine:a,pageURL:window.location.href,eventType:"warn",version:ua};b.wsStatus=Rc.getWSConnectionState(),Gb(ya,za,"stateMachine",b)}function ma(){$a||($a=setInterval(function(){la()},_a))}function na(){aa($a),$a=null}var oa,pa,qa,ra=a("./callstatsUtils"),sa="https://collector.callstats.io:443/",ta="https://auth.callstats.io/",ua="3.17.7",va="wss://collector.callstats.io:443/csiows/collectCallStats",wa="https://dashboard.callstats.io/apps/",xa="https://dashboard.callstats.io/api-internal/v1/qmodelthresholds",ya=null,za=null,Aa=null,Ba=null,Ca=!1,Da=!1,Ea=3e4,Fa=1e4,Ga=1e4,Ha=2e4,Ia=15e3,Ja=!1,Ka=1e4,La=5e3,Ma=function(){function a(a,b){setTimeout(function(){var b=d(),c=b-a.data.apiTS;a.data.timeShift=c,ia(a.channel,a.data,a.callback)},b)}var b=[];this.sendCachedEvents=function(c,e,f,g,h,i){if(!c.authToken)return void c.sendAuthenticationRequest(ya,za);if(!e){var j,k,l,m,n=d(),o=[],p=Math.max(Ia/b.length,ab);for(j=0;j<b.length;j++)if(l=b[j],l.data.action!==db.userJoined){if(l.data.token=c.authToken,f&&l.data.apiTS>=n-g||!l.data.ucID)if(m=decodeURIComponent(l.data.conferenceID),Ua[m]&&Ua[m].ucID)l.data.ucID=Ua[m].ucID;else{if(m!==h){o.push(b[j]);continue}l.data.ucID=i}if(l.data.clockUnsynced&&(l.data.apiTS+=Wa.currentOffset),l.channel===eb.processedStats&&l.data.clockUnsynced&&l.data.processedStatistics&&l.data.processedStatistics.length>0)for(k=0;k<l.data.processedStatistics.length;k++)l.data.processedStatistics[k].apiTS+=Wa.currentOffset;delete l.data.clockUnsynced,a(l,p*(j+1))}else o.push(b[j]);b=o}},this.sendCachedUserJoinedEvents=function(c){if(!c.authToken)return void c.sendAuthenticationRequest(ya,za);var d,e,f=[],g=Math.max(Ia/b.length,ab);for(d=0;d<b.length;d++)e=b[d],e.data.action===db.userJoined||e.data.action===cb.fabricSetupFailed?(e.data.token=c.authToken,e.data.clockUnsynced&&(e.data.apiTS=e.data.apiTS+Wa.currentOffset),e.data.value&&(e.data.value.statsSubmissionInterval=Ia),a(e,g*(d+1))):f.push(b[d]);b=f},this.cacheEvent=function(a){b.push(a)},this.sendCachedFeedback=function(){var a=Bb("feedback"),b=JSON.parse(Bb("csio_auth_data"));if(a&&b){var c=JSON.parse(a),d=b===c.token;d||za!==c.userID||(c.token=b,d=!0),d?ia(eb.userFeedback,c):Cb("feedback")}}},Na=new Ma,Oa=function(){var a=this,b="urn:x-callstats:auth:errorActions",c=.9,e=3600;this.authInProgress=!1,this.tokenData=null,this.authToken=null,this.tokenGenerator=function(a,b){b("Token generator not set")};var f=null,g=null,h=!1,i=window.atob,j=window.btoa,k=function(a){return j(a).replace(/\+/g,"-").replace(/\//g,"_").replace(/\=+$/,"")},l=function(a){for(var b=i(a.replace(/[ \r\n]+$/,"")),c=[],d=0;d<b.length;++d){var e=b.charCodeAt(d).toString(16);1===e.length&&(e="0"+e),c.push(e)}return c.join("")},m={};m.cryptotype=null,window.crypto&&window.crypto.subtle?(m.cryptotype="standard",m.subtlecrypto=window.crypto.subtle):window.crypto&&!window.crypto.subtle&&window.crypto.webkitSubtle?(m.cryptotype="webkit",m.subtlecrypto=window.crypto.webkitSubtle):window.msCrypto&&window.msCrypto.subtle?(m.cryptotype="ie",m.subtlecrypto=window.msCrypto.subtle):(m.subtlecrypto=null,console.info("WebCryptography API not supported in this browser.")),m.sign=function(a,b,c,d){if("HS256"!==a.alg)return d("Use header.alg=HS256");a=JSON.stringify(a),"string"!=typeof b&&(b=JSON.stringify(b));for(var e=k(a)+"."+k(b),f=new ArrayBuffer(e.length),g=new Uint8Array(f),h=e.length-1;h>=0;h--)g[h]=e.charCodeAt(h);var i=function(a){for(var b="",c=new Uint8Array(a),f=c.byteLength,g=0;g<f;g++)b+=String.fromCharCode(c[g]);return e+="."+k(b),d(null,e)},j=function(a){return d(a)},l={name:"HMAC"};"ie"!==m.cryptotype&&"webkit"!==m.cryptotype||(l.hash={name:"sha-256"});var n=m.subtlecrypto.sign(l,c,g);"ie"===m.cryptotype?(n.onerror=j,n.oncomplete=function(a){i(a.target.result)}):n.then(i).catch(j)},m.decode=function(a){try{return JSON.parse(i(a.split(".")[1]))}catch(a){return null}},m.importKey=function(a,b,c){if("webkit"===m.cryptotype)for(;a.length<32;)a+="\0";var d={kty:"oct",k:k(a),alg:"HS256"},e={name:"HMAC",hash:{name:"SHA-256"}};if("ie"===m.cryptotype?d.extractable=!1:d.ext=!1,"webkit"===m.cryptotype&&(e=null,d.use="sig"),"ie"===m.cryptotype||"webkit"===m.cryptotype){var f=JSON.stringify(d);d=new Uint8Array(f.length);for(var g=0;g<f.length;g++)d[g]=f.charCodeAt(g)}var h=m.subtlecrypto.importKey("jwk",d,e,!1,["sign"]);"ie"===m.cryptotype?(h.onerror=c,h.oncomplete=function(a){b(a.target.result)}):h.then(b).catch(c)},this._isTokenValid=function(a,b,c){var e=!1;if(null===a)return!1;try{var f=m.decode(a);if(null!==f&&f.appID===b&&f.userID===encodeURIComponent(c)){var g=null;if(navigator.mozGetUserMedia){var h=f.expiry.split(" ").join("T");g=Date.parse(h)}else g=new Date(f.expiry);var i=new Date(d());i<g&&(e=!0)}return e}catch(a){}return!1},this.setupAuthToken=function(a){Ab("csio_auth_data",JSON.stringify(a)),this.authToken=a,this.tokenData=m.decode(a),Ia=parseInt(this.tokenData.submissionInterval,10),Ja=this.tokenData.collectSDP},this.sendAuthenticationRequest=function(d,e,g){if(d&&e){if(a.authInProgress)return void ja(g);null!==f&&(clearTimeout(f),f=null),n(),a.authInProgress=!0,a.tokenGenerator(h,function(i,j){if(null!==i)return a.authInProgress=!1,void(g&&g(gb.tokenGenerationError,i.toString()));var k=ta+"authenticate",l={client_id:e+"@"+ya,code:j,grant_type:"authorization_code"};Mc(k,l,function(i){var j=null;a.authInProgress=!1;try{j=JSON.parse(i.response)}catch(a){}if(!j)return void(f=setTimeout(a.sendAuthenticationRequest,La,d,e,g));if(200===i.status){if("bearer"!==j.token_type)return void(f=setTimeout(a.sendAuthenticationRequest,La,d,e,g));a.setupAuthToken(j.access_token);var k=parseInt(1e3*parseInt(j.expires_in)*c);o(k,d,e,g),h=!1,g&&g(gb.success,"SDK authentication successful."),
+Rc._isChannelReady()?(Na.sendCachedUserJoinedEvents(Pa),g&&g(gb.success,"WebSocket establishment successful.")):Rc._setupWebSocketConnection(function(a,b){void 0!==g&&g(a,b)})}else{if(j[b]&&j[b].length>0)return p(d,e,g,j[b]);f=setTimeout(a.sendAuthenticationRequest,La,d,e,g)}})})}};var n=function(){null!==g&&(clearTimeout(g),g=null)},o=function(b,c,d,e){n(),g=setTimeout(function(){a.sendAuthenticationRequest(c,d,e)},b)},p=function(a,b,c,d){if(0!==d.length){var e=d.shift();return e.action===Ib.RETRY?(o(e.params.timeout,a,b,c),p(a,b,c,d)):e.action===Ib.GET_NEW_TOKEN?(h=!0,p(a,b,c,d)):e.action===Ib.REPORT_ERROR?p(a,b,c,d):void 0}};this.appSecretTokenGenerator=function(b){var c=null,f=null,g=!1,h=null;b.indexOf(":")>-1&&(h=l(b.split(":")[0]),b=b.split(":")[1]);var i=function(a){b=null,c=a},j=function(a){g=!0,b=null};return m.importKey(b,i,j),function(b,i){if(g)return i("appsecret based token generation failed");if(!b&&null!==f)return i(null,f);if(null===c)return setTimeout(function(){a.tokenGenerator(b,i)},100);var j={userID:za,appID:ya,exp:parseInt(d()/1e3)+e,nbf:parseInt(d()/1e3)-e};h&&(j.keyID=h),m.sign({alg:"HS256"},j,c,function(a,b){return a?i(a):(f=b,i(null,b))})}}},Pa=new Oa,Qa=new ra,Ra=Qa.detectBrowserInfo(),Sa=Qa.measureAppLoadingPerformance(Ra),Ta={type:"browser",name:Ra.name,ver:Ra.ver,os:Ra.os,osVersion:Ra.osVersion,userAgent:Ra.userAgent},Ua={},Va={statsSubmissionIntervalInMS:[1e3,2e3,5e3,1e4],statsSubmissionPhaseDurationInMS:[1e4,3e4,8e4,18e4]},Wa={currentOffset:0,offsetResults:[],syncStartTime:null,syncAttempts:5,syncHandler:null,maxAllowedLatency:6e4},Xa=!0,Ya=null,Za=null,$a=null,_a=2e4,ab=100,bb=null;"Firefox"===Ra.name?bb=mozRTCPeerConnection:"Chrome"===Ra.name||"Opera"===Ra.name?bb=webkitRTCPeerConnection:"Safari"===Ra.name||"Edge"===Ra.name&&(bb=window.RTCPeerConnection);var cb={fabricSetup:"fabricSetup",fabricSetupFailed:"fabricSetupFailed",fabricHold:"fabricHold",fabricResume:"fabricResume",audioMute:"audioMute",audioUnmute:"audioUnmute",videoPause:"videoPause",videoResume:"videoResume",fabricUsageEvent:"fabricUsageEvent",fabricStats:"fabricStats",fabricTerminated:"fabricTerminated",screenShareStart:"screenShareStart",screenShareStop:"screenShareStop",dominantSpeaker:"dominantSpeaker",userIDChangedEvent:"userIDChangedEvent",activeDeviceList:"activeDeviceList",applicationErrorLog:"applicationErrorLog"},db={autoFabricSetup:"autoFabricSetup",autoFabricSetupFailed:"autoFabricSetupFailed",userJoined:"userJoined",userLeft:"userLeft",fabricStatsCaching:"fabricStatsCaching",refreshPresence:"userAlive",ssrcMap:"ssrcMap",mediaPlaybackStartEvent:"mediaPlaybackStartEvent",mediaSuspendedEvent:"mediaSuspendedEvent",fabricStateChange:"fabricStateChange",iceDisruptionStart:"iceDisruptionStart",iceDisruptionEnd:"iceDisruptionEnd",fabricTransportSwitch:"fabricTransportSwitch",iceConnectionDisruptionStart:"iceConnectionDisruptionStart",iceConnectionDisruptionEnd:"iceConnectionDisruptionEnd",iceAborted:"iceAborted",iceTerminated:"iceTerminated",iceFailed:"iceFailed",iceRestarted:"iceRestarted",fabricDropped:"fabricDropped",connectedDevices:"connectedDevices"},eb={sdpSubmission:"sdpSubmissionEvent",rtpStats:"rtpStats",processedStats:"processedStats",callStatsEvent:"callStatsEvent",registerPresence:"registerPresence",userFeedback:"userFeedbackEvent",clockSync:"clockSync"},fb={success:"success",failure:"failure"},gb={httpError:"httpError",authError:"authError",wsChannelFailure:"wsChannelFailure",success:"success",csProtoError:"csProtoError",appConnectivityError:"appConnectivityError",tokenGenerationError:"tokenGenerationError",ok:"OK"},hb={authOngoing:"authOngoing"},ib={audio:"audio",video:"video",data:"data",screen:"screen",multiplex:"multiplex",unbundled:"unbundled"},jb={local:"local",remote:"remote"},kb={excellent:5,good:4,fair:3,poor:2,bad:1},lb={local:"local",remote:"remote",inbound:"inbound",outbound:"outbound"},mb={excellent:3,fair:2,bad:1},nb={excellent:"excellent",fair:"fair",bad:"bad"},ob={established:"established",initializing:"initializing",failed:"failed",disrupted:"disrupted",checkingDisrupted:"checkingDisrupted"},pb={createOffer:"createOffer",createAnswer:"createAnswer",setLocalDescription:"setLocalDescription",setRemoteDescription:"setRemoteDescription",addIceCandidate:"addIceCandidate",getUserMedia:"getUserMedia",iceConnectionFailure:"iceConnectionFailure",signalingError:"signalingError",applicationError:"applicationError",applicationLog:"applicationLog"},qb={mediaConfigError:"MediaConfigError",negotiationFailure:"NegotiationFailure",sdpError:"SDPGenerationError",iceFailure:"IceConnectionFailure",transportFailure:"TransportFailure",signalingError:"SignalingError",applicationError:"ApplicationError",applicationLog:"ApplicationLog"},rb={video:{gThreshold:1024,rThreshold:256},audio:{gThreshold:30,rThreshold:8}},sb={video:{gThreshold:.8,rThreshold:.3}},tb={video:{gThreshold:400,rThreshold:1e3}},ub={video:{gThreshold:10,rThreshold:50},audio:{gThreshold:15,rThreshold:30}},vb={audio:{gThreshold:240,rThreshold:400}},wb={chrome:"Chrome",firefox:"Firefox",edge:"Edge"},xb={unknown:"unknown",audio:"audio",video:"video"},yb={signalingState:"signalingState",iceConnectionState:"iceConnectionState",iceGatheringState:"iceGatheringState"},zb=[db.userJoined,db.refreshPresence,cb.fabricSetupFailed,cb.applicationErrorLog],Ab=function(a,b){try{window&&window.localStorage&&window.localStorage.setItem(a,b)}catch(a){return}},Bb=function(a){try{if(window&&window.localStorage)return window.localStorage.getItem(a)}catch(a){return null}return null},Cb=function(a){try{window&&window.localStorage&&window.localStorage.removeItem(a)}catch(a){return}},Db=function(){if(Ba=Bb("endpointID"),null===Ba){var a=c(),b=Math.random()*a;pc(b.toString(),function(a){Ba=a,Ab("endpointID",Ba)})}},Eb=function(a,b){var d=null,e=null,f=null,g=new XMLHttpRequest;g.timeout=5e3,g&&(g.open("GET",encodeURI(a)),d=c(),g.onload=function(){e=c(),f=e-d,b(g,f)},g.ontimeout=function(){Xa&&Oc()},g.send())},Fb=function(a,b,c){var d=new XMLHttpRequest;d&&(d.open("POST",encodeURI(a)),d.setRequestHeader("Content-Type","application/json"),d.onload=function(){c(d)},d.send(b))},Gb=function(a,b,c,d){var e=sa+"generics",f={appID:a,userID:encodeURIComponent(b),version:ua,eventType:c,data:d};Fb(e,JSON.stringify(f),function(a){200===a.status||200!==a.status})};window.addEventListener("error",function(a){if(a&&a.filename&&a.filename.indexOf("callstats")>-1){var b,c=!1,d={fileName:a.filename,line:a.lineno,col:a.colno,jsVersion:ua,eventType:"error",message:a.message,pageURL:window.location.href};for(b in Ua)Ua.hasOwnProperty(b)&&(d.conferenceID=b,Gb(ya,za,"onErrorLog",d),c=!0);c||Gb(ya,za,"onErrorLog",d)}});var Hb={invalidWebRTCFunctionName:"Invalid WebRTC function name"},Ib={RETRY:0,GET_NEW_TOKEN:1,REPORT_ERROR:2},Jb="fabricSetupFailed error reported by the developer",Kb=b(),Lb=function(a,b,e){var f=RegExp.prototype.test.bind(/^([a-z])=(.*)/),g=/^ssrc:(\d*) ([\w_]*):(.*)/,h=/^ssrc-group:SIM (\d*)/;b.split(/(\r\n|\r|\n)/).filter(f).forEach(function(b){var f=b[0],i=b.slice(2);if("a"===f){if(g.test(i)){var j=i.match(g),k=j[1];void 0===a.ssrcMap[k]&&(a.ssrcMap[k]={}),a.ssrcMap[k][j[2]]=j[3],a.ssrcMap[k].localStartTime=c(),a.ssrcMap[k].syncedStartTime=d(),a.ssrcMap[k].streamType=e}h.test(i)&&(void 0===a.ssrcMap.ssrcGroup&&(a.ssrcMap.ssrcGroup={},a.ssrcMap.ssrcGroup[e]={}),a.ssrcMap.ssrcGroup[e].simulcastGroup=i.match(/\d+/g))}})},Mb=function(a,b){return a.ssrcMap[b]},Nb=function(a){return a.ssrcMap},Ob=function(a,b,c,d,e,f){if(!e.localDescription||!e.remoteDescription)return!1;var g=e.localDescription.sdp,h=e.remoteDescription.sdp;if(!g||!h||g===d.localSDP&&h===d.remoteSDP)return!1;if(Lb(d,g,lb.outbound),Lb(d,h,lb.inbound),Ja){var i={sdp:{}};i.sdp.localSDP=g!==d.localSDP?g:-1,i.sdp.remoteSDP=h!==d.remoteSDP?h:-1,Qb(a,b,c,i,d.pcHash,f)}return d.localSDP=g,d.remoteSDP=h,!0},Pb=function(a,b,c,e,f,g,h){if(!a)return void console.error("sendEvent: Invalid eventType ");var i=d(),j={version:ua,apiTS:i,action:a,localID:encodeURIComponent(za),remoteID:encodeURIComponent(b),conferenceID:encodeURIComponent(c),timeShift:0,appID:ya,ucID:e,pcID:g,deviceID:Ba,value:f};return null===b&&(j.remoteID=null),null===c?void Gb(ya,za,"log",{msg:"conferenceID is null in sendEvent for "+a}):void(e&&!Xa||a===db.userJoined||a===cb.fabricSetupFailed||a===db.refreshPresence?(j.token=Pa.authToken,ia(eb.callStatsEvent,j,h)):(j.clockUnsynced=Xa,a!==db.fabricStatsCaching&&a!==db.refreshPresence&&Na.cacheEvent({channel:eb.callStatsEvent,data:j,callback:h})))},Qb=function(a,b,c,e,f,g){var h=d(),i={version:ua,appID:ya,conferenceID:encodeURIComponent(b),ucID:c,apiTS:h,localID:encodeURIComponent(za),remoteID:encodeURIComponent(a),pcID:f,deviceID:Ba,sdpPayload:e};Pa.authToken&&c&&!Xa?(i.token=Pa.authToken,ia(eb.sdpSubmission,i,g)):(i.clockUnsynced=Xa,Na.cacheEvent({channel:eb.sdpSubmission,data:i,callback:g}),Pa.authToken||Pa.sendAuthenticationRequest(ya,za))},Rb=function(a,b,c,d){var e=bc(a);if(e){var f=e.conferenceID,g=e.fabric,h=g.remoteUserID,i=Ua[f],j={changedState:b,currPair:g.activeIceCandidatePair,prevState:c,newState:d};Pb(db.fabricStateChange,h,f,i.ucID,j,g.pcHash)}},Sb=function(a){var b={connectedDevices:oa},c=Ua[a]?Ua[a].ucID:null;Pb(db.connectedDevices,null,a,c,b,null)},Tb=function(a){var b={ucID:Ua[a].ucID,endpoint:Ta,magicKey:Kb};Pb(db.refreshPresence,null,a,Ua[a].ucID,b,null)},Ub=function(){var a={appID:ya,userID:encodeURIComponent(za),version:ua,endpoint:Ta,pagePerf:Sa,endpointID:Ba,action:"registerPresence",channel:eb.registerPresence};ya!==-1&&Pa.authToken&&(a.token=Pa.authToken,Sc(eb.registerPresence,"registerPresence",a))},Vb=function(a,b){var c={};return c.status=a,b&&(c.message=b),c},Wb=function(a,b){var c,d,e,f=0;for(c=0,e=a.length;c<e;c++)d=a.charCodeAt(c),f=(f<<5)-f+d,f|=0;return b&&b(f),f},Xb=function(a,b,c,d,e,f){if(!a||!c||!b)return console.error("initialize: Argument missing/invalid"),Vb(fb.failure,"initialize: Argument missing/invalid");if("function"!=typeof b){if(!(window.crypto&&(window.crypto.subtle||window.crypto.webkitSubtle)||window.msCrypto&&window.msCrypto.subtle))return d(gb.tokenGenerationError,"Browser does not support Web Cryptography API. App secret based authentication requires Web Cryptography API"),Vb(fb.failure,"Browser does not support Web Cryptography API. App secret based authentication requires Web Cryptography API");b=Pa.appSecretTokenGenerator(b)}if("string"==typeof a&&(a=parseInt(a,10)),ya=a,"object"==typeof c?(za=c.aliasName,Aa=c):za=c,Gb(ya,za,"log",{msg:"callstats initialize in progress"}),Pa.tokenGenerator=b,Bb("csio_auth_data"))try{var g=JSON.parse(Bb("csio_auth_data"));Pa._isTokenValid(g,ya,za)&&(d&&d(gb.success,"SDK authentication successful."),Pa.setupAuthToken(g),Rc._isChannelReady()||Rc._setupWebSocketConnection(d))}catch(a){}return f&&(f.disableBeforeUnloadHandler===!0&&(Ca=!0),null===f.applicationVersion&&void 0===f.applicationVersion||(Ta.appVer=f.applicationVersion)),k(),qa=e,Pa.sendAuthenticationRequest(ya,za,d),Vb(fb.success)},Yb=function(a){return function(b){if(b.remoteUserID===a)return!0}},Zb=function(a,b){var c=!1,d=null;return Ua[a]&&Ua[a].participants&&(d=Ua[a].participants.filter(Yb(b))),c=!!(d&&d.length>0)},$b=function(a){return function(b){return b.pc===a||(!(!a.callstatsID||b.pcHash!==a.callstatsID)||void 0)}},_b=function(a,b){var c=null,d=null;return Ua[a]&&Ua[a].participants&&(d=Ua[a].participants.filter($b(b))),c=d&&d.length>0?d[0]:null},ac=function(a,b){var c=null,d=null;return c=_b(a,b),c&&(d=c.pcHash),d},bc=function(a){var b=null,c=null,d=null;for(b in Ua)if(Ua.hasOwnProperty(b)&&(d=_b(b,a))){c={fabric:d,conferenceID:b};break}return c},cc=function(a,b){var c=0;if(a&&Ua[b].participants)for(c=0;c<Ua[b].participants.length;c++)if(Ua[b].participants[c].pcHash===a.pcHash){Ua[b].participants.splice(c,1);break}},dc=function(a){var b=Ra.codebase,c=null,d=0;if(b===wb.firefox&&"Safari"!==Ra.name)c=[],a.forEach(function(a){c.push(a)});else if(b===wb.chrome&&"Safari"!==Ra.name)a&&(c=a.result());else{c=[];for(d in a)a.hasOwnProperty(d)&&c.push(a[d])}return c},ec=function(a){var b=null,c=null,d=null,e=[],f=[],g=[],h=0,i=Ra.codebase;if(b=dc(a),!b)return{localCandidates:e,remoteCandidates:f};for(h=0;h<b.length;++h)c=X(b[h]),d=U(JSON.parse(c),i),d.localCandidate?e.push(d.localCandidate):d.remoteCandidate?f.push(d.remoteCandidate):d.Transport&&g.push(d.Transport);return{localCandidates:e,remoteCandidates:f,iceCandidatePairs:g}},fc=function(a){function b(b){var c={};c=ec(b),a(c)}return b},gc=function(a,b,c,d,e,f,g,h){var i=Ra.codebase,j=Ra.name;i===wb.firefox||"Safari"===j?a.getStats(null,c(b,d,e,f,g,h,a),function(a){Gb(ya,d,"log",{msg:"### "+i+" getStats reports error "+JSON.stringify(a)})}):i===wb.chrome?a.getStats(c(b,d,e,f,g,h,a)):i===wb.edge&&a.getStats().then(c(b,d,e,f,g,h,a)).catch(function(a){Gb(ya,d,"log",{msg:"### "+i+" getStats reports error "+JSON.stringify(a)})})},hc=function(a,b){gc(a,b,fc)},ic=function(a,b,d,e){if(!a||!b||!d)return console.error("sendFabricEvent: Arguments missing/Invalid"),Vb(fb.failure,"sendFabricEvent: Arguments missing/Invalid");if(!ya||!za||!Ua[d])return console.error("sendFabricEvent: SDK is not initialized or no Fabrics added."),Vb(fb.failure,"sendFabricEvent: SDK is not initialized or no Fabrics added.");if(b===cb.fabricSetupFailed)return console.error("sendFabricEvent: Unsupported fabricEvent fabricSetupFailed"),Vb(fb.failure,"sendFabricEvent: Unsupported fabricEvent fabricSetupFailed");if(!o(a))return console.error("sendFabricEvent: Invalid PeerConnection object passed"),Vb(fb.failure,"sendFabricEvent: Invalid PeerConnection object passed");if(!cb.hasOwnProperty(b)&&!db.hasOwnProperty(b))return console.error("sendFabricEvent: Invalid fabricEvents value: ",b),Vb(fb.failure,"sendFabricEvent: Invalid fabricEvents value: "+b);var f={},g=null,h=c(),i=Ua[d],j=null;if(void 0===i)return console.error("sendFabricEvent: Conference ID not found!"),Vb(fb.failure,"sendFabricEvent: Conference ID not found!");if(j=_b(d,a),null===j)return console.error("sendFabricEvent: fabricData is null"),Vb(fb.failure,"sendFabricEvent: fabricData is null");g=j.remoteUserID;var k=j.startTime;if(b===cb.fabricSetupFailed){var l=h-k;f={failureDelay:l,reason:qb.iceFailure,domError:Jb,fabricState:j.pcState,iceConnectionState:j.pc.iceConnectionState,function:pb.iceConnectionFailure,magicKey:Kb,endpoint:Ta}}else if(b===cb.activeDeviceList){if(!e||!e.deviceList)return console.error("sendFabricEvent: Arguments missing/Invalid"),Vb(fb.failure,"sendFabricEvent: Arguments missing/Invalid");f={magicKey:Kb,endpoint:Ta,activeDevicelist:e.deviceList}}if(Pb(b,g,d,i.ucID,f,j.pcHash,j.pcCallback),(b===cb.fabricTerminated||b===db.autoFabricSetupFailed||b===cb.fabricSetupFailed)&&Ua[d].participants){j&&(j.statsInterval=aa(j.statsInterval),cc(j,d));var m=ea(d);m.conferenceFinished&&fa(d,m.ucID)}return Vb(fb.success)},jc=function(a){return a.length>Ha&&(console.log("Log exceeds 20kb, It will be truncated"),a=a.substring(0,Ha)),a},kc=function(a){return a&&"string"==typeof a?a=jc(a):a&&"object"==typeof a&&a.message&&(a.message=jc(a.message)),a},lc=function(a,b,c){return b?b:a&&a[c]?a[c].sdp:-1},mc=function(a,d,e,f,g,h){if(void 0===a||!e||!d)return console.error("reportError: Arguments missing/invalid"),Vb(fb.error,"reportError: Arguments missing/invalid");if(!ya||!za)return console.error("reportError: SDK is not initialized"),Vb(fb.error,"reportError: SDK is not initialized");if(!pb.hasOwnProperty(e))return console.error("reportError: Invalid webRTC functionName value: %o",e),Vb(fb.error,"reportError: Invalid webRTC functionName value: "+e);void 0===f&&console.warn("reportError: Missing dom error parameter");var i,j=null,k=null,l=c(),m=Ua[d],n=null;if(i=T(e),f&&f instanceof DOMException)f={message:f.message,name:f.name};else if(f&&"object"==typeof f){var p={};f.message&&(p.message=f.message),f.name&&(p.name=f.name),f.constraintName&&(p.constraintName=f.constraintName),f.stack&&(p.stack=f.stack),f=p}if(f=kc(f),o(a)){if(void 0===m)return console.error("reportError: Conference ID not found!"),Vb(fb.error,"reportError: Conference ID not found!");if(n=_b(d,a),null===n)return console.error("reportError: Invalid pcObject passed as argument"),Vb(fb.error,"reportError: Invalid pcObject passed as argument");k=n.remoteUserID;var q=n.startTime,r=l-q;if(j={failureDelay:r,reason:i,domError:f,fabricState:n.pcState,iceConnectionState:n.pc.iceConnectionState,function:e,magicKey:Kb,endpoint:Ta},e===pb.applicationLog||e===pb.applicationError?Pb(cb.applicationErrorLog,k,d,m.ucID,j,n.pcHash,n.pcCallback):Pb(cb.fabricSetupFailed,k,d,m.ucID,j,n.pcHash,n.pcCallback),g||h||a&&a.localDescription||a&&a.remoteDescription){var s={sdp:{}};s.sdp.localSDP=lc(a,g,"localDescription"),s.sdp.remoteSDP=lc(a,h,"remoteDescription"),Qb(k,d,m.ucID,s,n.pcHash)}}else{null===Kb&&(Kb=b());var t=null;e!==pb.getUserMedia&&(t=b()),j={failureDelay:0,reason:i,domError:f,function:e,magicKey:Kb,endpoint:Ta},e===pb.applicationLog||e===pb.applicationError?Pb(cb.applicationErrorLog,k,d,null,j,null,null):Pb(cb.fabricSetupFailed,k,d,null,j,t,null)}return Vb(fb.success)},nc=function(a){for(var b=[],c=0;c<a.length;c++){var d=a.charCodeAt(c);d<128?b[b.length]=d:d>127&&d<2048?(b[b.length]=d>>6|192,b[b.length]=63&d|128):(b[b.length]=d>>12|224,b[b.length]=d>>6&63|128,b[b.length]=63&d|128)}return new Uint8Array(b).buffer},oc=function(a){for(var b,c=new DataView(a),d="",e=0;e<c.byteLength;e++)b=c.getUint8(e).toString(16),b.length<2&&(b="0"+b),d+=b;return d},pc=function(a,b){var c={name:"SHA-256"};if(window.crypto){var d=window.crypto.subtle||window.crypto.webkitSubtle;if(!d)return void Wb(a,b);d.digest(c,nc(a)).then(function(a){b(oc(a))}).catch(function(){Wb(a,b)})}else if(window.msCrypto){if(!window.msCrypto.subtle)return void Wb(a,b);var e=window.msCrypto.subtle.digest(c,nc(a));e.oncomplete=function(a){a.target&&b(oc(a.target.result))},e.onerror=function(){Wb(a,b)}}else Wb(a,b)},qc=function(a,b,c){var d;if(!b||!a)return console.error("sendUserFeedback: Arguments missing/Invalid"),Vb(fb.error,"sendUserFeedback: Arguments missing/Invalid");if("object"!=typeof b)return console.error("sendUserFeedback: Invalid feedback object."),Vb(fb.error,"sendUserFeedback: Invalid feedback object.");if(0===Object.keys(b).length)return console.error("sendUserFeedback: Feedback data object must not be empty."),Vb(fb.error,"sendUserFeedback: Feedback data object must not be empty.");if(!b.hasOwnProperty("overall"))return console.error("sendUserFeedback: Feedback data object must contain 'conferenceID', 'userID' and 'overall' keys."),Vb(fb.error,"sendUserFeedback: Feedback data object must contain 'conferenceID', 'userID' and 'overall' keys.");var e=Ua[a],f=null;void 0!==e&&void 0!==e.ucID&&(f=e.ucID);var g=null;if(g=null===Kb?Ya:Kb,null===f&&(f=ha(a)),null===f)return console.error("sendUserFeedback: ucID unavailable"),Vb(fb.error,"sendUserFeedback: ucID unavailable");d="object"==typeof b.userID?b.userID.aliasName:b.userID;var h={conferenceID:encodeURIComponent(a),magicKey:g,appID:ya,version:ua,ucID:f,userID:encodeURIComponent(d),userQoe:{overall:b.overall}};return b.video?h.userQoe.video=b.video:h.userQoe.video=-1,b.audio?h.userQoe.audio=b.audio:h.userQoe.audio=-1,b.screen?h.userQoe.screen=b.screen:h.userQoe.screen=-1,b.comment?h.userQoe.comment=b.comment:h.userQoe.comment=-1,Pa.authToken&&!Xa?(h.token=Pa.authToken,Ab("feedback",JSON.stringify(h)),ia(eb.userFeedback,h,c)):(h.clockUnsynced=Xa,Na.cacheEvent({channel:eb.userFeedback,data:h,callback:c}),Pa.sendAuthenticationRequest(ya,d)),Vb(fb.success)},rc=function(a,b,c,d,e,f){var g=null;if(g="object"==typeof b?b.aliasName:b,!(a&&c&&g&&d&&e))return console.error("associateMstWithUserID: Arguments missing"),Vb(fb.error,"associateMstWithUserID: Arguments missing");if(""===c||""===g||""===d||""===e)return console.error("associateMstWithUserID: conferenceID or remoteUserID or ssrc MUST not be empty"),Vb(fb.error,"associateMstWithUserID: conferenceID or remoteUserID or ssrc MUST not be empty");if(!o(a))return console.error("associateMstWithUserID: Invalid PeerConnection object passed"),Vb(fb.error,"associateMstWithUserID: Invalid PeerConnection object passed");var h=Ua[c];if(void 0===h)return console.error("associateMstWithUserID: conferenceID doesn't exist"),Vb(fb.error,"associateMstWithUserID: conferenceID doesn't exist");var i=null;if(i=_b(c,a),null===i)return console.error("associateMstWithUserID: Unknown pcObject passed"),Vb(fb.error,"associateMstWithUserID: Unknown pcObject passed");var j=Mb(i,d);return void 0===j&&(i.ssrcMap[d]={},j=Mb(i,d)),j.remoteUserID=g,j.ssrc=d,j.associatedVideoTag=f,j.usageLabel=e,f&&g!==za&&n(g,c,f,a,d),Vb(fb.success)},sc=function(a,d,e,f,g){var h=null,i={authStatus:!!Pa.tokenData,clockSync:!Xa,msg:"addNewFabric called",eventType:"warn",pageURL:window.location.href,conferenceID:f,version:ua};if(Gb(ya,za,"stateMachine",i),h="object"==typeof d?d.aliasName:d,!(a&&h&&e&&f))return console.error("addNewFabric: Arguments missing/Invalid"),Vb(fb.error,"addNewFabric: Arguments missing/Invalid");if(!ya||!za)return console.error("addNewFabric: SDK not initialized."),Vb(fb.error,"addNewFabric: SDK not initialized");if(""===f||""===h)return console.error("addNewFabric: conferenceID or remoteUserID MUST not be empty"),Vb(fb.error,"addNewFabric: conferenceID or remoteUserID MUST not be empty");if(!o(a))return console.error("addNewFabric: Invalid PeerConnection object passed"),Vb(fb.error,"addNewFabric: Invalid PeerConnection object passed");if(!ib.hasOwnProperty(e)||e instanceof Function)return console.error("addNewFabric: Invalid fabricUsage value"),Vb(fb.error,"addNewFabric: Invalid fabricUsage value");var k=c();null===Kb&&(Kb=b());var l=null,m=!1;if(!ca(f)){var n=Z(Kb);Pb(db.userJoined,null,f,null,n,null,null),m=!0,i={authStatus:!!Pa.tokenData,clockSync:!Xa,msg:"userJoined sent",pageURL:window.location.href,eventType:"warn",conferenceID:f,version:ua},Gb(ya,za,"stateMachine",i)}if($(f,l,m),!_b(f,a)){a&&a.addEventListener&&(a.addEventListener("icecandidate",Gc,!1),a.addEventListener("iceconnectionstatechange",Fc,!1),a.addEventListener("signalingstatechange",vc,!1),a.addEventListener("negotiationneeded",Ec,!1));var p=b(),q={pc:a,remoteUserID:h,fabricUsage:e,magicKey:Kb,startTime:k,pcCallback:g,pcState:ob.initializing,fabricSetupSent:!1,iceCandidates:[],iceConnectionState:a.iceConnectionState,latestEventSent:k,pcHash:p,localSDP:-1,remoteSDP:-1,statsInterval:null,initialPhaseOver:!1,intervalAdaptionPhase:!0,gatheringIceCandidatesDelay:0,connectivityIceStatusDelay:0,numNegotiationNeededCalls:0,currentActivePhaseIndex:0,ssrcMap:{}};"function"!=typeof a||a.callstatsID||(a.callstatsID=p),"connected"!==a.iceConnectionState&&"completed"!==a.iceConnectionState||(q.pcState=ob.established),da(f,q),q.pcState===ob.established&&(Jc(a,db.autoFabricSetup,f),wc(q,a,f,h))}return j(f),Vb(fb.success)},tc=function(a,b,c,d){if(!(a&&c&&d&&b))return console.error("reportUserIDChange: Arguments missing/Invalid"),Vb(fb.error,"reportUserIDChange: Arguments missing/Invalid");if(!ya||!za)return console.error("reportUserIDChange: SDK not initialized."),Vb(fb.error,"reportUserIDChange: SDK not initialized");if(""===c||""===b)return console.error("reportUserIDChange: id or  conferenceID MUST not be empty"),Vb(fb.error,"reportUserIDChange: id or  conferenceID MUST not be empty");if(!o(a))return console.error("reportUserIDChange: Invalid PeerConnection object passed"),Vb(fb.error,"reportUserIDChange: Invalid PeerConnection object passed");var e,f=null,g=Ua[b];if(void 0===g)return console.error("reportUserIDChange: Conference ID not found!"),Vb(fb.error,"reportUserIDChange: Conference ID not found!");var h=null;if(void 0===g.ucID)return console.error("reportUserIDChange: addNewFabric was not called"),Gb(ya,za,"log",{msg:"### reportUserIDChange: addNewFabric was not called"}),Vb(fb.error,"reportUserIDChange: addNewFabric was not called");if(h=g.ucID,f=_b(b,a),null===f)return console.error("reportUserIDChange: Invalid pcObject passed as argument"),Vb(fb.error,"reportUserIDChange: Invalid pcObject passed as argument");var i={id:c,idType:d};return Pb(cb.userIDChangedEvent,e,b,h,i,null,f.pcCallback),Vb(fb.success)},uc=function(a){var b=null;if(a&&a.length>0){var c=a.filter(function(a){return"true"===a.selected||"true"===a.googActiveConnection});c.length>0&&(b=c[0])}return b},vc=function(a){if(a){var b,c,d=Ra.codebase,e=null;if(d===wb.firefox)b=a.target;else if(d===wb.chrome)b=a.srcElement;else{if(d!==wb.edge)return void console.error("PeerConnection signaling state changed: unsupported code base");b=a.pc}if(void 0!==b){var f=b.signalingState;e=bc(b),e&&e.fabric&&("closed"===f&&ic(b,cb.fabricTerminated,e.conferenceID),c=e.fabric.signalingState,e.fabric.signalingState=f),Rb(b,yb.signalingState,c,f)}}},wc=function(a,b,d,e){null===a.statsInterval&&(a.statsPollingStart=c(),Ic(b,d,e),a.statsInterval=setInterval(Ic,Va.statsSubmissionIntervalInMS[a.currentActivePhaseIndex],b,d,e))},xc=function(a,b,c,d,e,f){hc(a,function(a){b.localCandidates=a.localIceCandidates,b.remoteCandidates=a.remoteCandidates,b.iceCandidatePairs=a.iceCandidatePairs,b.activeIceCandidatePair=uc(b.iceCandidatePairs),f.localCandidates=b.localCandidates,Pb(db.iceFailed,c,d,e,f,b.pcHash,b.pcCallback)})},yc=function(a,b,c,d){var e=b.iceConnectionState,f=b.remoteUserID,g=Ua[c],h={prevIceConnectionState:e,currIceConnectionState:a.iceConnectionState,currPair:b.activeIceCandidatePair,failureDelay:d};b.pcState=ob.failed,"checking"===e?xc(a,b,f,c,g.ucID,h):"completed"===e||"connected"===e?Pb(db.fabricDropped,f,c,g.ucID,h,b.pcHash,b.pcCallback):"disconnected"===e&&b.established?Pb(db.fabricDropped,f,c,g.ucID,h,b.pcHash,b.pcCallback):"disconnected"===e&&xc(a,b,f,c,g.ucID,h)},zc=function(a,b,d,e){var f=b.iceConnectionState,g=b.remoteUserID,h=Ua[d],i=c(),j={prevIceConnectionState:f,currIceConnectionState:a.iceConnectionState,prevPair:b.activeIceCandidatePair},k=b.pcState===ob.disrupted;b.connectivityIceStatusDelay=e,b.established=!0,hc(a,function(a){b.localCandidates=a.localIceCandidates,b.remoteCandidates=a.remoteCandidates,b.iceCandidatePairs=a.iceCandidatePairs,b.activeIceCandidatePair=uc(b.iceCandidatePairs),j.currPair=b.activeIceCandidatePair,j.disruptionDelay=i-b.disruptedTS,k&&Pb(db.iceDisruptionEnd,g,d,h.ucID,j,b.pcHash,b.pcCallback)}),Jc(b.pc,db.autoFabricSetup,d),b.pcState=ob.established,wc(b,a,d,g)},Ac=function(a,b,d){var e=b.iceConnectionState,f=b.remoteUserID,g=Ua[d],h=c(),i={prevIceConnectionState:e,currIceConnectionState:a.iceConnectionState,prevIceConnectionStateTs:b.iceConnectionStateTS,currPair:b.activeIceCandidatePair};b.startTime=h,"connected"===e||"completed"===e?(b.pcState=ob.disrupted,b.disruptedTS=h,Pb(db.iceDisruptionStart,f,d,g.ucID,i,b.pcHash,b.pcCallback),b.pcCallback&&b.pcCallback(gb.appConnectivityError,"Connectivity check for PC object to "+f+" failed.")):"checking"===e&&(b.pcState=ob.checkingDisrupted,b.disruptedTS=h,Pb(db.iceConnectionDisruptionStart,f,d,g.ucID,i,b.pcHash,b.pcCallback),b.pcCallback&&b.pcCallback(gb.appConnectivityError,"Connectivity check for PC object to "+f+" failed."))},Bc=function(a,b,c,d){var e=b.iceConnectionState,f=b.remoteUserID,g=Ua[c],h={prevIceConnectionState:e,currIceConnectionState:a.iceConnectionState};"new"===e||"checking"===e?(h.failureDelay=d,Pb(db.iceAborted,f,c,g.ucID,h,b.pcHash,b.pcCallback)):(h.currPair=b.activeIceCandidatePair,Pb(db.iceTerminated,f,c,g.ucID,h,b.pcHash,b.pcCallback))},Cc=function(a,b,c){var d=b.iceConnectionState,e=b.remoteUserID,f=Ua[c],g={prevIceConnectionState:d,currIceConnectionState:a.iceConnectionState,prevPair:b.activeIceCandidatePair};"new"!==d&&(b.established=!1,Pb(db.iceRestarted,e,c,f.ucID,g,b.pcHash,b.pcCallback))},Dc=function(a,b,d,e){var f=b.iceConnectionState,g=b.remoteUserID,h=Ua[d],i=c(),j={prevIceConnectionState:f,currIceConnectionState:a.iceConnectionState};b.gatheringIceCandidatesDelay=e,"disconnected"===f&&b.pcState===ob.checkingDisrupted&&(j.disruptionDelay=i-b.disruptedTS,Pb(db.iceConnectionDisruptionEnd,g,d,h.ucID,j,b.pcHash,b.pcCallback))},Ec=function(a){if(a){var b,c=Ra.codebase;if(c===wb.firefox)b=a.target;else if(c===wb.chrome)b=a.srcElement;else{if(c!==wb.edge)return void console.error("PeerConnection negotiation needed: unsupported code base");b=a.pc}if(void 0!==b){var d=null;d=bc(b),d&&d.fabric&&d.fabric.numNegotiationNeededCalls++}}},Fc=function(a){if(a){var b,d=Ra.codebase;if(d===wb.firefox)b=a.target;else if(d===wb.chrome)b=a.srcElement;else{if(d!==wb.edge)return void console.error("PeerConnection ICE connection state changed: unsupported code base");b=a.pc}if(void 0!==b){var e,f,g,h,i,j=null,k=null;k=bc(b),k&&k.fabric&&(j=k.fabric,e=k.conferenceID,f=c(),g=f-j.startTime,h=j.iceConnectionState,i=j.iceGatheringState,"complete"===b.iceGatheringState&&"checking"===b.iceConnectionState&&Dc(b,j,e,g),"connected"===b.iceConnectionState||"completed"===b.iceConnectionState?zc(b,j,e,g):"failed"===b.iceConnectionState?yc(b,j,e,g):"disconnected"===b.iceConnectionState?Ac(b,j,e):"closed"===b.iceConnectionState?Bc(b,j,e,g):"new"===b.iceConnectionState&&Cc(),j.iceConnectionState=b.iceConnectionState,j.iceGatheringState=b.iceGatheringState,j.iceConnectionStateTS=c()),i!==b.iceGatheringState&&Rb(b,yb.iceGatheringState,i,b.iceGatheringState),Rb(b,yb.iceConnectionState,h,b.iceConnectionState)}}},Gc=function(a){var b,c,d;if(null!==a.candidate){var e=a.candidate.candidate;c=e.split(" ");var f="1"===c[1]?"rtp":"rtcp";"0"!==c[5]&&(d=c[4].indexOf(":")!==-1,b={transport:c[2],protocol:f,typePreference:c[3],address:d?"["+c[4]+"]:"+c[5]:c[4]+":"+c[5],type:c[7],media:a.candidate.sdpMid})}var g,h=Ra.codebase;if(h===wb.firefox)g=a.target;else if(h===wb.chrome)g=a.srcElement;else{if(h!==wb.edge)return void console.error("PeerConnection ICE candidate found: unsupported code base");g=a.pc}if(void 0!==g){var i=null;i=bc(g),i&&i.fabric&&void 0!==b&&i.fabric.iceCandidates.indexOf(b)===-1&&i.fabric.iceCandidates.push(b)}},Hc=function(a){var b,c=5e3;return Da?(b=Ea,a.intervalAdaptionPhase=!1,Da=!1):a.currentActivePhaseIndex<Va.statsSubmissionIntervalInMS.length-1?(a.currentActivePhaseIndex+=1,b=Va.statsSubmissionIntervalInMS[a.currentActivePhaseIndex],b>Ia&&(b=Ia,a.intervalAdaptionPhase=!1,a.initialPhaseOver=!0)):(b=Ia,a.intervalAdaptionPhase=!1),b>c&&(a.initialPhaseOver=!0),b},Ic=function(a,b,d){if(!Ua.hasOwnProperty(b))return void console.error("ConferenceID %o doesn't exist. Can't call getStats for it.",b);if(!Zb(b,d))return void console.error("Remote user ID %o doesn't exist. Can't call getStats for it.",d);if("closed"===a.signalingState)return ic(a,cb.fabricTerminated,b),!0;var e=_b(b,a);if(e.pcState!==ob.established&&e.lastFabricState===e.pcState&&"connected"!==a.iceConnectionState&&"completed"!==a.iceConnectionState)return!0;var f=Ua[b].ucID;gc(a,e.pcCallback,S,za,d,b,f,e);var g,h=c(),i=h-e.statsPollingStart;(i>Va.statsSubmissionPhaseDurationInMS[e.currentActivePhaseIndex]&&e.intervalAdaptionPhase||Da===!0)&&(aa(e.statsInterval),g=Hc(e),e.statsInterval=setInterval(Ic,g,a,b,d))},Jc=function(a,b,d){var e,f=null,g=Ua[d],h=null,i=c();if(void 0===g&&console.error("sendAutoFabricSetupEvent: Conference ID not found!"),h=_b(d,a),null===h&&console.error("sendAutoFabricSetupEvent: fabricData is null"),!h.fabricSetupSent){f=h.remoteUserID,e=i-h.startTime;var j={setupDelay:e,iceGatheringDelay:h.gatheringIceCandidatesDelay,iceConnectivityDelay:h.connectivityIceStatusDelay};Xa||(j.clockSyncOffset=Wa.currentOffset),hc(a,function(a){j.localCandidates=a.localCandidates,j.remoteCandidates=a.remoteCandidates,j.iceCandidatePairs=a.iceCandidatePairs,h.localCandidates=a.localCandidates,h.remoteCandidates=a.remoteCandidates,h.iceCandidatePairs=a.iceCandidatePairs,h.pcState=ob.established,h.fabricSetupSent=!0,h.activeIceCandidatePair=uc(h.iceCandidatePairs),Pb(b,f,d,g.ucID,j,h.pcHash,h.pcCallback)})}},Kc=function(a,b,c){var d={},e=null,f=Ua[c],g=null;void 0===f&&console.error("sendFabricTransportSwitchEvent: Conference ID not found!"),g=_b(c,a),null===g&&console.error("sendFabricTransportSwitchEvent: fabricData is null"),
+e=g.remoteUserID,d.prevPair=g.activeIceCandidatePair,hc(a,function(a){d.currPair=uc(a.iceCandidatePairs),g.activeIceCandidatePair=d.currPair,d.switchDelay=null,d.relayType=g.transportData.relayType,Pb(b,e,c,f.ucID,d,g.pcHash,g.pcCallback)})},Lc=function(a,b,c){b.hasOwnProperty(a)&&(b[a].hasOwnProperty("video")&&(b[a].video.isGreaterBetter?(c.video.gThreshold=b[a].video.upperThreshold,c.video.rThreshold=b[a].video.lowerThreshold):(c.video.gThreshold=b[a].video.lowerThreshold,c.video.rThreshold=b[a].video.upperThreshold)),b[a].hasOwnProperty("audio")&&(b[a].audio.isGreaterBetter?(c.audio.gThreshold=b[a].audio.upperThreshold,c.audio.rThreshold=b[a].audio.lowerThreshold):(c.audio.gThreshold=b[a].audio.lowerThreshold,c.audio.rThreshold=b[a].audio.upperThreshold)))},Mc=function(a,b,c){var d=[];for(var e in b)b.hasOwnProperty(e)&&d.push(encodeURIComponent(e)+"="+encodeURIComponent(b[e]));var f=d.join("&"),g=new XMLHttpRequest;g.open("POST",a),g.setRequestHeader("Content-Type","application/x-www-form-urlencoded"),g.onload=function(){c(g)},g.send(f)},Nc=function(){Eb(xa,function(a){if(200===a.status)try{var b=JSON.parse(a.responseText);Lc("eModelThreshold",b,vb),Lc("throughputThreshold",b,rb),Lc("fractionalLossThreshold",b,ub),Lc("rttThreshold",b,tb),Lc("currOverPrevFrameRateThreshold",b,sb)}catch(a){return a}})},Oc=function(){var a=sa+"clockSync",b=null,d=null;Eb(a,function(a,e){200===a.status?(b=JSON.parse(a.response),d=c(),Pc(b,e,d)):Xa&&setTimeout(function(){Oc()},100)})},Pc=function(a,b,c){if(Xa){var d=b/2;if(d>Wa.maxAllowedLatency)Wa.offsetResults=[],Gb(ya,za,"log",{msg:"clockSync restarting"});else{var e=a.now+d,f=e-c;Wa.offsetResults.push(f)}if(Wa.offsetResults.length>=Wa.syncAttempts){var g=Wa.offsetResults.reduce(function(a,b){return a+b});Wa.currentOffset=g/Wa.offsetResults.length,Wa.offsetResults=[],Xa=!1,Gb(ya,za,"log",{msg:"clockSync Done"}),Na.sendCachedUserJoinedEvents(Pa),Na.sendCachedEvents(Pa,Xa)}else Xa&&setTimeout(function(){Oc()},100)}},Qc=function(){var a=this,b=null,d=!1,e=!1,f={},g={initiated:"initiated",connected:"connected",closed:"closed"};this._wsConnectionState=g.closed;var h=function(a,b){var c=JSON.parse(window.sessionStorage.getItem("csio_ucid_data"));c||(c={}),c[a]||(c[a]={}),c[a].ucID=b,window.sessionStorage.setItem("csio_ucid_data",JSON.stringify(c)),f[a]=wa+ya+"/conferences/"+encodeURIComponent(a)+"/"+b+"/general"};this.getConferenceURL=function(){return f},this._setupWebSocketConnection=function(f){return a._wsConnectionState===g.initiated||a._wsConnectionState===g.connected?(Gb(ya,za,"log",{msg:"### _setupWebSocketConnection is called when already connected!"}),void(f&&f(gb.success,"WebSocket establishment successful."))):(a._wsConnectionState=g.initiated,b=new WebSocket(va,"echo-protocol"),b.onopen=function(){Gb(ya,za,"log",{msg:"Successfully connected to the backend"}),a._wsConnectionState=g.connected,d?e=!0:d=!0,Wa.syncHandler||(Gb(ya,za,"log",{msg:"start clockSync"}),Wa.offsetResults=[],Oc(),Wa.syncHandler=!0),Na.sendCachedUserJoinedEvents(Pa),e?(ga(),Na.sendCachedEvents(Pa)):Ub(),e=!1},b.onclose=function(){a._wsConnectionState=g.closed,Gb(ya,za,"log",{msg:"Connection to the server closed."}),ba(),Xa&&(Wa.offsetResults=[],Wa.syncHandler=null,Xa=!1),b&&(b=null),f&&f(gb.httpError,"Connection to the server closed.")},b.onerror=function(b){a._wsConnectionState=g.closed,Gb(ya,za,"log",{msg:"WebSocket establishment failed."}),f&&f(gb.wsChannelFailure,"WebSocket establishment failed.",b)},void(b.onmessage=function(a){var b,d=a.data,e=c(),g=JSON.parse(d);if("Error"===g.status)"Invalid client token."===g.reason&&(Pa.tokenData=null,Pa.authToken=null,Pa.sendAuthenticationRequest(ya,za)),f&&f(gb.csProtoError,d.reason);else if("200 OK"===g.status)if("feedback"===g.event)Cb("feedback");else if(g.event===db.userJoined||g.event===db.refreshPresence){var i=!1,j=null;b=decodeURIComponent(g.conferenceID);var k=function(a){return setInterval(function(){Tb(a)},Ka)};Ua.hasOwnProperty(b)&&(Ua[b].ucID!==g.ucID&&(i=!0,h(b,g.ucID),j=g.conferenceCreationTS?g.conferenceCreationTS:g.conferenceDuration),g.event!==db.userJoined||Ua[b].refreshPresence||(Ua[b].refreshPresence=k(b),na()),Ua[b].ucID=g.ucID),Na.sendCachedFeedback(),Na.sendCachedEvents(Pa,Xa,i,j,b,g.ucID)}else g.event===eb.clockSync?Pc(g,e):g.event===cb.fabricSetupFailed&&(b=decodeURIComponent(g.conferenceID),g.ucID&&(h(b,g.ucID),Na.sendCachedFeedback(),Na.sendCachedEvents(Pa,Xa,!0,0,b,g.ucID)))}))},this._isChannelReady=function(){return!(!b||1!==b.readyState)},this.getWSConnectionState=function(){return b?b.readyState:-1},this.send=function(a){b.send(JSON.stringify(a))}},Rc=new Qc,Sc=function(a,b,c){if(Rc._isChannelReady())try{Rc.send(b)}catch(d){d&&"InvalidStateError"===d.name&&Na.cacheEvent({channel:a,data:b,callback:c})}else Na.cacheEvent({channel:a,data:b,callback:c}),Rc._setupWebSocketConnection()};return f(),Nc(),Oc(),ma(),Db(),{version:ua,initialize:Xb,fabricEvent:cb,addNewFabric:sc,sendFabricEvent:ic,sendUserFeedback:qc,associateMstWithUserID:rc,csError:gb,fabricUsage:ib,qualityRating:kb,webRTCFunctions:pb,reportError:mc,reportUserIDChange:tc,userIDType:jb,callStatsAPIReturnStatus:fb}}"function"==typeof define&&define.amd?define("callstats",[],c):b.callstats=c}("undefined"!=typeof window?window:"undefined"!=typeof b?b:this)}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{})},{"./callstatsUtils":2}],2:[function(a,b,c){"use strict";function d(){}d.prototype.measureAppLoadingPerformance=function(a){var b=0,c=Number.MAX_VALUE,d=0,e="",f="",g=window.performance;if(!("performance"in window&&"timing"in window.performance&&"navigation"in window.performance))return{support:"none",total:void 0};var h=g.timing.loadEventEnd-g.timing.navigationStart;if("Chrome"===a.name||"Opera"===a.name){var i,j=g.getEntriesByType("resource");for(i=0;i<j.length;i++)j[i].duration>d&&(f=j[i].name.substr(j[i].name.lastIndexOf("/")+1),d=j[i].duration),j[i].duration<c&&(e=j[i].name.substr(j[i].name.lastIndexOf("/")+1),c=j[i].duration),j[i].name.indexOf("CALLSTATS_SRC_URLstatic/callstats")>-1&&(b=j[i].duration);return{support:"full",callstats:b,min:{name:e,time:c},max:{name:f,time:d},total:h}}return"Firefox"===a.name?{support:"limited",total:h}:void 0},d.prototype.detectBrowserInfo=function(){var a,b,c=navigator.userAgent,d=navigator.appName,e=navigator.appVersion,f=""+parseFloat(navigator.appVersion),g={goog:"Chrome",moz:"Firefox",plugin:"Plugin",edge:"Edge"};(a=c.indexOf("Opera"))!==-1?(d="Opera",f=c.substring(a+6),(a=c.indexOf("Version"))!==-1&&(f=c.substring(a+8)),b=g.goog):(a=c.indexOf("OPR"))!==-1?(d="Opera",f=c.substring(a+4),(a=c.indexOf("Version"))!==-1&&(f=c.substring(a+8)),b=g.goog):(a=c.indexOf("MSIE"))!==-1?(d="Microsoft Internet Explorer",f=c.substring(a+5),b=g.goog):(a=c.indexOf("Edge"))!==-1?(d=g.edge,f=c.substring(a+5),b=g.edge):(a=c.indexOf("Chrome"))!==-1?(d=g.goog,f=c.substring(a+7),b=g.goog):(a=c.indexOf("Safari"))!==-1?(d="Safari",f=c.substring(a+7),(a=c.indexOf("Version"))!==-1&&(f=c.substring(a+8)),b=g.goog):(a=c.indexOf("Firefox"))!==-1?(d="Firefox",f=c.substring(a+8),b=g.moz):(a=c.indexOf("Trident"))!==-1&&(d="Microsoft Internet Explorer",a=c.indexOf("rv"),f=c.substring(a+3,a+7),b=g.goog);var h,i,j=null,k=[{s:"Windows 3.11",r:/Win16/},{s:"Windows 95",r:/(Windows 95|Win95|Windows_95)/},{s:"Windows ME",r:/(Win 9x 4.90|Windows ME)/},{s:"Windows 98",r:/(Windows 98|Win98)/},{s:"Windows CE",r:/Windows CE/},{s:"Windows 2000",r:/(Windows NT 5.0|Windows 2000)/},{s:"Windows XP",r:/(Windows NT 5.1|Windows XP)/},{s:"Windows Server 2003",r:/Windows NT 5.2/},{s:"Windows Vista",r:/Windows NT 6.0/},{s:"Windows 7",r:/(Windows 7|Windows NT 6.1)/},{s:"Windows 8.1",r:/(Windows 8.1|Windows NT 6.3)/},{s:"Windows 8",r:/(Windows 8|Windows NT 6.2)/},{s:"Windows 10",r:/(Windows 10|Windows NT 10.0)/},{s:"Windows NT 4.0",r:/(Windows NT 4.0|WinNT4.0|WinNT|Windows NT)/},{s:"Windows ME",r:/Windows ME/},{s:"Android",r:/Android/},{s:"Open BSD",r:/OpenBSD/},{s:"Sun OS",r:/SunOS/},{s:"Linux",r:/(Linux|X11)/},{s:"iOS",r:/(iPhone|iPad|iPod)/},{s:"Mac OS X",r:/Mac OS X/},{s:"Mac OS",r:/(MacPPC|MacIntel|Mac_PowerPC|Macintosh)/},{s:"QNX",r:/QNX/},{s:"UNIX",r:/UNIX/},{s:"BeOS",r:/BeOS/},{s:"OS/2",r:/OS\/2/},{s:"Search Bot",r:/(nuhk|Googlebot|Yammybot|Openbot|Slurp|MSNBot|Ask Jeeves\/Teoma|ia_archiver)/}];for(h in k)if(i=k[h],i.r.test(c)){j=i.s;break}var l=null;switch(/Windows/.test(j)&&(l=/Windows (.*)/.exec(j)[1],j="Windows"),j){case"Mac OS X":l=/Mac OS X (10[\.\_\d]+)/.exec(c)[1];break;case"Android":l=/Android ([\.\_\d]+)/.exec(c)[1];break;case"iOS":l=/OS (\d+)_(\d+)_?(\d+)?/.exec(e),l=l[1]+"."+l[2]+"."+(0|l[3])}return{name:d,ver:f.toString(),os:j,osVersion:l,codebase:b,userAgent:c}},b.exports=d},{}]},{},[1]);
+/**
+ * Part of this code was taken from the JsSIP source code
+ * and modified a bit to make it run as wanted
+ */
+
+var T1 = 500,
+    T2 = 4000,
+    T4 = 5000;
+
+
+var Timers = {
+    T1: T1,
+    T2: T2,
+    T4: T4,
+    TIMER_B: 64 * T1,
+    TIMER_D: 0 * T1,
+    TIMER_F: 64 * T1,
+    TIMER_H: 64 * T1,
+    TIMER_I: 0 * T1,
+    TIMER_J: 0 * T1,
+    TIMER_K: 0 * T4,
+    TIMER_L: 64 * T1,
+    TIMER_M: 64 * T1,
+    PROVISIONAL_RESPONSE_INTERVAL: 60000  // See RFC 3261 Section 13.3.1.1
+};
+
+/**
+ * Handle SessionTimers for an incoming INVITE or UPDATE.
+ * @param  {IncomingRequest} request
+ * @param  {Array} responseExtraHeaders  Extra headers for the 200 response.
+ */
+function handleSessionTimersInIncomingRequest(request, responseExtraHeaders) {
+    if (!this.sessionTimers.enabled) { return; }
+
+    var session_expires_refresher;
+
+    if (request.session_expires && request.session_expires >= JsSIP.C.MIN_SESSION_EXPIRES) {
+        this.sessionTimers.currentExpires = request.session_expires;
+        session_expires_refresher = request.session_expires_refresher || 'uas';
+    }
+    else {
+        this.sessionTimers.currentExpires = this.sessionTimers.defaultExpires;
+        session_expires_refresher = 'uas';
+    }
+
+    responseExtraHeaders.push('Session-Expires: ' + this.sessionTimers.currentExpires + ';refresher=' + session_expires_refresher);
+
+    this.sessionTimers.refresher = (session_expires_refresher === 'uas');
+    runSessionTimer.call(this);
+}
+
+/**
+ * Handle SessionTimers for an incoming response to INVITE or UPDATE.
+ * @param  {IncomingResponse} response
+ */
+function handleSessionTimersInIncomingResponse(response) {
+    if (!this.sessionTimers.enabled) { return; }
+
+    var session_expires_refresher;
+
+    if (response.session_expires && response.session_expires >= JsSIP_C.MIN_SESSION_EXPIRES) {
+        this.sessionTimers.currentExpires = response.session_expires;
+        session_expires_refresher = response.session_expires_refresher || 'uac';
+    }
+    else {
+        this.sessionTimers.currentExpires = this.sessionTimers.defaultExpires;
+        session_expires_refresher = 'uac';
+    }
+
+    this.sessionTimers.refresher = (session_expires_refresher === 'uac');
+    runSessionTimer.call(this);
+}
+
+function runSessionTimer() {
+    var self = this;
+    var expires = this.sessionTimers.currentExpires;
+
+    this.sessionTimers.running = true;
+
+    clearTimeout(this.sessionTimers.timer);
+
+    // I'm the refresher.
+    if (this.sessionTimers.refresher) {
+        this.sessionTimers.timer = setTimeout(function () {
+            if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
+
+            sendUpdate.call(self, {
+                eventHandlers: {
+                    succeeded: function (response) {
+                        handleSessionTimersInIncomingResponse.call(self, response);
+                    }
+                }
+            });
+        }, expires * 500);  // Half the given interval (as the RFC states).
+    }
+
+    // I'm not the refresher.
+    else {
+        this.sessionTimers.timer = setTimeout(function () {
+            if (self.status === JsSIP.C.STATUS_TERMINATED) { return; }
+
+            self.terminate({
+                cause: JsSIP_C.causes.REQUEST_TIMEOUT,
+                status_code: 408,
+                reason_phrase: 'Session Timer Expired'
+            });
+        }, expires * 1100);
+    }
+}
+
+
+function setInvite2xxTimer(request, body) {
+    var
+        self = this,
+        timeout = Timers.T1;
+
+    this.timers.invite2xxTimer = setTimeout(function invite2xxRetransmission() {
+        if (self.status !== JsSIP.C.STATUS_WAITING_FOR_ACK) {
+            return;
+        }
+
+        request.reply(200, null, ['Contact: ' + self.contact], body);
+
+        if (timeout < Timers.T2) {
+            timeout = timeout * 2;
+            if (timeout > Timers.T2) {
+                timeout = Timers.T2;
+            }
+        }
+        self.timers.invite2xxTimer = setTimeout(
+            invite2xxRetransmission, timeout
+        );
+    }, timeout);
+}
+
+
+/**
+ * RFC3261 14.2
+ * If a UAS generates a 2xx response and never receives an ACK,
+ *  it SHOULD generate a BYE to terminate the dialog.
+ */
+function setACKTimer() {
+    var self = this;
+
+    this.timers.ackTimer = setTimeout(function () {
+        if (self.status === JsSIP.C.STATUS_WAITING_FOR_ACK) {
+            clearTimeout(self.timers.invite2xxTimer);
+            sendRequest.call(self, JsSIP.C.BYE);
+            ended.call(self, 'remote', null, JsSIP.C.causes.NO_ACK);
+        }
+    }, Timers.TIMER_H);
+}
+
+function ended(originator, message, cause) {
+    this.end_time = new Date();
+
+    this.close();
+    this.emit('ended', {
+        originator: originator,
+        message: message || null,
+        cause: cause
+    });
+}
+
+// extend.js
+// Written by Andrew Dupont, optimized by Addy Osmani
+function extend(destination, source) {
+
+	var toString = Object.prototype.toString,
+		objTest = toString.call({});
+
+	for (var property in source) {
+		if (source[property] && objTest === toString.call(source[property])) {
+			destination[property] = destination[property] || {};
+			extend(destination[property], source[property]);
+		} else {
+			destination[property] = source[property];
+		}
+	}
+	return destination;
+
+}
+
+var voxbone = voxbone || {};
+
+/**
+ * Handles ajax requests in order to avoid using jQuery
+*/
+extend(voxbone, {
+  Request: {
+    param: function (data) {
+      var encodedString = '';
+      for (var prop in data) {
+        if (data.hasOwnProperty(prop)) {
+          if (encodedString.length > 0) {
+            encodedString += '&';
+          }
+          encodedString += prop + '=' + encodeURIComponent(data[prop]);
+        }
+      }
+      return encodedString;
+    },
+
+    post: function(url, data, callback) {
+      var request = new XMLHttpRequest();
+      var postData = this.param(data);
+
+      request.open('POST', url);
+      request.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+      request.onload = function() {
+        if (typeof callback === 'function') {
+          callback({
+            status: request.status,
+            message: request.responseText
+          });
+        }
+      };
+
+      request.send(postData);
+    },
+
+    jsonp: function(url, data) {
+      var src = url + (url.indexOf('?') + 1 ? '&' : '?');
+      var head = document.getElementsByTagName('head')[0];
+      var newScript = document.createElement('script');
+
+      src += this.param(data);
+      newScript.type = 'text/javascript';
+      newScript.src = src;
+
+      if (this.currentScript) head.removeChild(currentScript);
+      head.appendChild(newScript);
+    }
+  }
+});
+
+// some overrides
+JsSIP.C.SESSION_EXPIRES = 3600;
+
+// first make sure that we enable the verbose mode of JsSIP
+JsSIP.debug.enable('JsSIP:*');
+
+// then we monkey patch the debug function to buffer the log messages
+JsSIP.debug.log = function () {
+	var logger = (arguments[0].indexOf('ERROR') === -1) ? JsSIP.VoxboneLogger.loginfo : JsSIP.VoxboneLogger.logerror;
+	return logger.apply(this, arguments);
+};
+
+JsSIP.VoxboneLogger = {
+	loginfo: function () {
+		var args = Array.prototype.slice.call(arguments);
+		info.apply(console, args);
+	},
+	logerror: function () {
+		var args = Array.prototype.slice.call(arguments);
+		error.apply(console, args);
+	},
+	setError: function (fn) { error = fn; },
+	setInfo: function (fn) { info = fn; }
+};
+
+JsSIP.VoxboneLogger.setInfo(function() {
+	var args = Array.prototype.slice.call(arguments);
+	if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {
+		console.log.apply(console,args);
+	}
+	if (args.length == 5) {
+		voxbone.Logger.addLogToBuffer("INFO: "+args[0]);
+		voxbone.Logger.addLogToBuffer("INFO: "+args[3]);
+	} else {
+		voxbone.Logger.addLogToBuffer("INFO: "+args[0]);
+	}
+});
+
+JsSIP.VoxboneLogger.setError = function () {
+	var args = Array.prototype.slice.call(arguments);
+	if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.ERROR) {
+		console.error.apply(console, args);
+	}
+	if (args.length == 5) {
+		voxbone.Logger.addLogToBuffer("ERROR: "+args[0]);
+		voxbone.Logger.addLogToBuffer("ERROR: "+args[3]);
+	} else {
+		voxbone.Logger.addLogToBuffer("ERROR: "+args[0]);
+	}
+};
+
+extend(voxbone, {
+	Logger : {
+		loginfo : function(log) {
+			if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {
+				console.log(log);
+			}
+			voxbone.Logger.addLogToBuffer("INFO: "+ log);
+		},
+		logerror : function(log) {
+			if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.ERROR) {
+				console.log(log);
+			}
+			voxbone.Logger.addLogToBuffer("ERROR: "+ log);
+		},
+		addLogToBuffer : function(log) {
+			voxbone.WebRTC.webrtcLogs = voxbone.WebRTC.webrtcLogs.concat("\r\n");
+			voxbone.WebRTC.webrtcLogs = voxbone.WebRTC.webrtcLogs.concat(log);
+		},
+		log_level : {NONE : 0, ERROR : 1, INFO : 2}
+	}
+});
+
+/**
+ * Pinger Logic & Best POP Selection for WebRTC
+ */
+extend(voxbone, {
+	Pinger: {
+		/**
+		 * Placeholder for ping result
+		 */
+		pingResults: [],
+
+		/**
+		 * Load an image and compute the time it took to load.
+		 * Loading time is then stored into pingResult for further processing.
+		 * Each pop will host a small http server to serve the image.
+		 *
+		 * If a ping fails, a value of -1 will be stored
+		 *
+		 * @param pop Name of the Pop to ping, mainly used as an identifier for storing ping result.
+		 * @param url URL of the Pop to ping
+		 */
+		ping: function (pop, url) {
+			var started = new Date().getTime();
+			var _that = this;
+			var callback = this.recordPingResult;
+
+			this.img = new Image();
+			_that.inUse = true;
+
+			this.img.onload = function () {
+				var elapsed = new Date().getTime() - started;
+				callback(pop, elapsed);
+				_that.inUse = false;
+			};
+
+			this.img.onerror = function (e) {
+				_that.inUse = false;
+				callback(pop, -1);
+			};
+
+			this.img.src = url + "?" + new Date().getTime();
+			this.timer = setTimeout(function () {
+				if (_that.inUse) {
+					_that.inUse = false;
+					callback(pop, -1);
+				}
+			}, 1500);
+		},
+
+		/**
+		 * Record the ping result for a given pop and store it into a placeholder
+		 * A duration of -1 will be used in the event a ping has timeout or URL doesn't resolve.
+		 *
+		 * @param pop Pop identifier
+		 * @param duration ping duration
+		 */
+		recordPingResult: function (pop, duration) {
+			//if(duration < 0 ) return;
+            		voxbone.Logger.loginfo("[ping] "+pop+" replied in "+duration);
+			var entry = {
+				name: pop,
+				ping: duration
+			};
+
+			voxbone.Pinger.pingResults.push(entry);
+		},
+
+		/**
+		 * Extract which Pop is best from all the pinged Pop.
+		 * It iterate over all stored ping result and returns the best one excluding ping of -1.
+		 *
+		 * @returns Name of the Pop which has the best ping
+		 */
+		getBestPop: function () {
+			var bestPop;
+            //If no proper ping server found, default to BE
+            if(this.pingResults.length === 0){
+                bestPop =  {
+                    name:'BE',
+                    ping: -1
+                };
+            //Else find the fastest
+            }else{
+                for (var i = 0; i < this.pingResults.length; i++) {
+                    var result = this.pingResults[i];
+                    if ((bestPop === undefined) || (result.ping > 0 && ((bestPop.ping < 0) || (result.ping < bestPop.ping) ))) {
+                        bestPop = result;
+                    }
+                }
+            }
+			return bestPop;
+		}
+	}
+});
+
+/**
+ *
+ */
+extend(voxbone, {
+
+	WebRTC: {
+                callStats : undefined,
+		/**
+		 * id of the <audio/> html tag.
+		 * If an audio element with this id already exists in the page, the script will load it and attach audio stream to it.
+		 * If not found, the script will create the audio component and attach the audio stream to it.
+		 */
+		audioComponentName: 'peer-audio',
+
+    /**
+     * id of the <video/> html tag.
+     * If a video element with this id already exists in the page, the script will load it and attach video stream to it.
+     * If not found, the script will create the video component and attach the stream to it.
+     */
+    videoComponentName: 'peer-video',
+
+    /**
+     * Indiciate if video should be used or not.
+     * If video is set to true, then the user will be prompted for webcam access.
+     *
+     */
+    allowVideo : false,
+
+		/**
+		 * URL of voxbone ephemeral auth server
+		 */
+		authServerURL: 'https://webrtc.voxbone.com/rest/authentication/createToken',
+
+		/**
+		 * URL of voxbone ephemeral auth server for basic auth
+		 */
+		basicAuthServerURL: 'https://webrtc.voxbone.com/rest/authentication/basicToken',
+
+		/**
+		 * Blob containing the logs for a webrtc session
+		 */
+		webrtcLogs: "",
+
+		/**
+		 * The actual WebRTC session
+		 */
+		rtcSession: {},
+		/**
+		 * SIP call id for current session
+		 */
+		callid: "",
+		/**
+		 * SIP call id of previous session
+		 */
+		previous_callid: "",
+		/**
+		 * The web audiocontext
+		 */
+		audioContext: undefined,
+
+		/**
+		 * local media volume
+		 */
+		localVolume: 0,
+
+		/**
+		 * The callback timer for local media volume
+		 */
+		localVolumeTimer: undefined,
+
+		/**
+		 * Timer used if customer wants to insert a add
+		 * some gap between the digits
+		 */
+		dtmfTimer: undefined,
+
+		/**
+		 * The script processor for local media volume
+		 */
+		audioScriptProcessor: {},
+
+		/**
+		 * Used to bypass ping mechanism and enforce the POP to be used
+		 * If set to 'undefined' ping will be triggered and best pop will be set as preferedPop
+		 */
+		preferedPop: undefined,
+
+		/**
+		 * Configuration object use to hold authentication data as well as the list of Web Socket Servers.
+		 * This Configuration object is the native JsSip configuration object.
+		 */
+		configuration: {
+			'authorization_user': undefined,
+			'password': undefined,
+			'ws_servers': undefined,
+			'stun_servers': undefined,
+			'turn_servers': undefined,
+			'log_level': voxbone.Logger.log_level.INFO,
+			'post_logs': false,
+			/**
+			It controls if we want to push
+			the logs for a web session where
+			the user didn't make any call attempt
+			**/
+			'post_logs_nocall': false,
+			'webrtc_log': undefined,
+			'uri': 'sip:voxrtc@voxbone.com',
+			'trace_sip': true,
+			'register': false,
+			/**
+			 * dialer_string
+			 * Digits to dial after call is established
+			 * dialer string is comma separated, to define a specfic pause between digits,
+			 * we add another entry like 1,700ms,2, this will add a 700ms of pause between
+			 * digits 1 & 2.
+			 * Example = '1,2,3,1200ms,4,5,900ms,6,#'
+			*/
+			'dialer_string': undefined,
+			'digit_duration': 100,  // duration of a digit
+			'digit_gap': 500 // pause between two digits
+		},
+
+		customEventHandler: {
+			'progress': function (e) {
+			},
+			'accepted': function (e) {
+			},
+			'getUserMediaFailed': function (e) {
+				voxbone.Logger.logerror("Failed to access mic/camera");
+			},
+			'localMediaVolume': function (e) {
+			},
+			'failed': function (e) {
+			},
+			'ended': function (e) {
+			},
+			'authExpired': function (e) {
+			},
+			'getUserMediaAccepted': function(e) {
+				voxbone.Logger.loginfo("local media accepted");
+			}
+		},
+
+		/**
+		 * Actual JsSIP User-Agent
+		 */
+		phone: undefined,
+
+		/**
+		 * Context is a variable which will hold anything you want to be transparently carried to the call
+		 */
+		context: undefined,
+
+		/**
+		 * Authenticate toward voxbone ephemeral server and get jsonp callback onto voxbone.WebRTC.processAuthData
+		 * in order to process authentication result data.
+		 *
+		 * @param credentials credentials to be used against ephemeral auth server
+		 */
+		init: function (credentials) {
+			voxbone.Logger.loginfo('auth server: ' + this.authServerURL);
+
+			var data = {
+				'username': credentials.username,
+				'key': credentials.key,
+				'expires': credentials.expires,
+				'jsonp': 'voxbone.WebRTC.processAuthData'
+			};
+
+			voxbone.Request.jsonp(this.authServerURL, data);
+		},
+
+		/**
+		 * Same as init, only difference is that it is used for basic authentication
+		 * @param username: webrtc username of the customer
+		 * @param key: webrtc key in plain text of the customer
+		 */
+		basicAuthInit: function (username, key) {
+			voxbone.Logger.loginfo('auth server: ' + this.basicAuthServerURL);
+
+			var data = {
+				'username': username,
+				'key': key,
+				'jsonp': 'voxbone.WebRTC.processAuthData'
+			};
+
+      var callback = function (data) {};
+			voxbone.Request.jsonp(this.basicAuthServerURL, data);
+		},
+
+		/**
+		 * Process the Authentication data from Voxbone ephemeral auth server.
+		 * It retrieves the list of ping servers and invoke voxbone.Pinger.ping on each of them.
+		 * It also store the URI of websocket server and authorization data.
+		 *
+		 * @param data the Data from voxbone ephemeral server to process
+		 */
+		processAuthData: function (data) {
+			this.configuration.ws_servers = data.wss;
+			this.configuration.stun_servers = data.stunServers;
+			this.configuration.turn_servers = data.turnServers;
+			this.configuration.webrtc_log = data.log;
+
+			this.configuration.authorization_user = data.username;
+			this.configuration.password = data.password;
+
+
+			// If no prefered Pop is defined, ping and determine which one to prefer
+			if (typeof this.preferedPop === 'undefined') {
+				voxbone.Logger.loginfo("prefered pop undefined, pinging....");
+				this.pingServers = data.pingServers;
+				for (var i = 0; i < this.pingServers.length; i++) {
+					voxbone.Pinger.ping(i, this.pingServers[i]);
+				}
+			} else {
+				voxbone.Logger.loginfo("preferred pop already set to " + this.preferedPop);
+			}
+
+			var timeout = this.getAuthExpiration();
+			if (timeout > 0) {
+				voxbone.Logger.loginfo("Credential expires in " + timeout + " seconds");
+				// refresh at 75% of duration
+				setTimeout(this.customEventHandler.authExpired, timeout * 750);
+			}
+
+			var callstats_credentials = data.callStatsCredentials;
+			voxbone.WebRTC.callStats = new callstats(null, null, jsSHA);
+
+			var csInitCallback = function(csError, csMsg) {
+				voxbone.Logger.loginfo("callStats Status: errCode= " + csError + " Msg= " + csMsg );
+			};
+			var localUserId = ((data.username).split(":"))[1];
+			voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
+		},
+
+		/**
+		 * Calculates the number of seconds until the current WebRTC token expires
+		 *
+		 * @returns time until expration in seconds
+		 */
+
+		getAuthExpiration: function (data) {
+			var now = Math.floor((new Date()).getTime()/1000);
+			var fields = this.configuration.authorization_user.split(/:/);
+			return fields[0] - now;
+		},
+
+
+		/**
+		 * Check if the document contains an audio element with the provided id.
+		 * If no audio element exists, it creates it. prior to bind audio stream to it.
+		 *
+		 * @param id id of the audio element
+		 * @param audioStream audio stream from the WebSocket
+		 * @returns {HTMLElement}
+		 */
+		initAudioElement: function (id, audioStream) {
+			var audio = document.getElementById(id);
+			//If Audio element doesn't exist, create it
+			if (!audio) {
+				audio = document.createElement('audio');
+				audio.id = id;
+				audio.hidden = false;
+				audio.autoplay = true;
+                document.body.appendChild(audio);
+			}
+			//Bind audio stream to audio element
+			audio.src = (window.URL ? URL : webkitURL).createObjectURL(audioStream);
+			return audio;
+		},
+
+    /**
+     * Check if the document contains a video element  with the provided id.
+     * If no video element exists, it created it prior to bind video stream to it
+     *
+     * @param id of the video element
+     * @param videoStream video stream from the WebSocket
+     * @returns {HTMLElement}
+     */
+    initVideoElement : function(id, videoStream) {
+        var video = document.getElementById(id);
+        if(!video){
+            video = document.createElement('video');
+            video.id = id;
+            video.hidden = false;
+            video.autoplay = true;
+            document.body.appendChild(video);
+        }
+        //Bind video stream to video element
+        video.src = (window.URL ? URL : webkitURL).createObjectURL(videoStream);
+        return video;
+    },
+
+
+    sendPreConfiguredDtmf : function(digitsPending) {
+			var digit;
+			var pause = 0;
+			var digit_sent = false;
+
+			if (voxbone.WebRTC.dtmfTimer !== undefined) {
+				clearTimeout(voxbone.WebRTC.dtmfTimer);
+				voxbone.WebRTC.dtmfTime = undefined;
+			}
+			if (digitsPending.length > 0) {
+				if (digitsPending[0].indexOf('ms') != -1) {
+					/*Calculate the pause in this case*/
+					pause = parseInt(digitsPending[0].substring(0,digitsPending[0].indexOf('ms')));
+				} else {
+					/*We found a digit*/
+					digit = digitsPending[0];
+				}
+				digitsPending = digitsPending.slice(1, digitsPending.length);
+				if (digit !== undefined) {
+					var d = Date.now();
+					voxbone.WebRTC.rtcSession.sendDTMF(digit);
+					digit_sent = true;
+				}
+				if (digitsPending.length > 0) {
+					var nextDigitGap = pause > 0 ? (pause - voxbone.WebRTC.configuration.digit_gap) : (voxbone.WebRTC.configuration.digit_gap + voxbone.WebRTC.configuration.digit_duration);
+					if (nextDigitGap < 0) {
+						/*We can't have a negative pause between digits*/
+						nextDigitGap = 0;
+					}
+					voxbone.WebRTC.dtmfTimer = setTimeout(function () {
+						voxbone.WebRTC.sendPreConfiguredDtmf(digitsPending);
+						}, nextDigitGap);
+				}
+
+			}
+		},
+
+    postCallRating : function(e164, rating, comment, url) {
+			if (voxbone.WebRTC.previous_callid !== undefined) {
+				var data = {
+					'payload_type': "webrtc_call_rating",
+					'username': voxbone.WebRTC.configuration.authorization_user,
+					'password': voxbone.WebRTC.configuration.password,
+					'callid' : voxbone.WebRTC.previous_callid,
+					'e164' : e164,
+					'url' : url,
+					'rating' : rating,
+					'comment' : comment
+				};
+				var postUrl = voxbone.WebRTC.configuration.webrtc_log;
+				voxbone.Request.post(postUrl, data);
+
+
+				/*
+				 *We are assuming that postCallRating is the
+				 *only function using previous_callid, so
+				 *we can nuke it here
+				*/
+				voxbone.WebRTC.previous_callid = undefined;
+			}
+		},
+
+    postLogsToServer : function() {
+			if (voxbone.WebRTC.configuration.post_logs === true) {
+				/* Push the webrtc logs to the logging server */
+				if (voxbone.WebRTC.configuration.webrtc_log !== undefined) {
+
+          var url = voxbone.WebRTC.configuration.webrtc_log;
+          var data = {
+            'payload_type': "webrtc_logs",
+            'username': voxbone.WebRTC.configuration.authorization_user,
+            'password': voxbone.WebRTC.configuration.password,
+            'callid' : voxbone.WebRTC.callid,
+            'pop' : voxbone.WebRTC.preferedPop,
+            'context' : voxbone.WebRTC.context,
+            'uri' : voxbone.WebRTC.configuration.uri,
+            'logs' : voxbone.WebRTC.webrtcLogs
+          };
+          voxbone.Request.post(url, data);
+				}
+			}
+		},
+
+		// Clean up the webrtc object, resets any ongoing timers and
+		// other data specific to the current call
+    cleanUp: function () {
+			if (voxbone.WebRTC.localVolumeTimer !== undefined) {
+				clearInterval(voxbone.WebRTC.localVolumeTimer);
+				voxbone.WebRTC.localVolumeTimer = undefined;
+			}
+
+			if (voxbone.WebRTC.audioScriptProcessor !== undefined) {
+				if (voxbone.WebRTC.audioContext !== undefined && voxbone.WebRTC.audioContext.destination !== undefined)
+				{
+					voxbone.WebRTC.audioScriptProcessor.disconnect(voxbone.WebRTC.audioContext.destination);
+				}
+				voxbone.WebRTC.audioScriptProcessor = undefined;
+			}
+			if (voxbone.WebRTC.dtmfTimer !== undefined) {
+				clearTimeout(voxbone.WebRTC.dtmfTimer);
+				voxbone.WebRTC.dtmfTimer = undefined;
+			}
+			voxbone.WebRTC.cleanAudioElement(voxbone.WebRTC.audioComponentName);
+			voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
+			voxbone.WebRTC.callid = "";
+			voxbone.WebRTC.webrtcLogs = "";
+			voxbone.WebRTC.rtcSession = {};
+			delete voxbone.WebRTC.phone;
+		},
+
+		/**
+		 * Check if the document contains an audio element with the provided id.
+		 * If audio element exists, cleans the src attr and reload it to
+		 * avoid having the sound icon enabled in some browser
+		 *
+		 * @param id of the audio element
+		 * @returns {HTMLElement}
+		 */
+		cleanAudioElement: function (id) {
+			var audio = document.getElementById(id);
+			// check if audio element really exists
+			if (audio) {
+				audio.removeAttribute('src');
+				audio.load();
+			}
+
+			return audio;
+		},
+
+		/**
+		 * Place a call on a given phone number.
+		 * Prior to place the call, it will lookup for best possible POP to use
+		 * and set the X-Voxbone-Pop header accordingly
+		 *
+		 * @param destPhone phone number to dial in E164 format.
+		 */
+		call: function (destPhone) {
+			var uri = new JsSIP.URI('sip', destPhone, 'voxout.voxbone.com');
+			if (this.preferedPop === undefined) {
+				this.preferedPop = voxbone.Pinger.getBestPop().name;
+			}
+			voxbone.Logger.loginfo("prefered pop: ", this.preferedPop);
+
+			var headers = [];
+			headers.push('X-Voxbone-Pop: ' + this.preferedPop);
+
+			if (this.context) {
+				headers.push('X-Voxbone-Context: ' + this.context);
+			}
+
+			var options = {
+				'eventHandlers': {
+					'peerconnection': function (e) {
+						var streams = e.peerconnection.getLocalStreams();
+						voxbone.Logger.loginfo("streams "+ streams.length);
+						for (var i = 0; i < streams.length; i++) {
+							if (streams[i].getAudioTracks().length > 0) {
+								/*activate the local volume monitoring*/
+								try {
+									if (voxbone.WebRTC.audioContext === undefined)
+									{
+										voxbone.WebRTC.audioContext = new AudioContext();
+									}
+								}
+								catch (err) {
+									voxbone.Logger.logerror("Web Audio API not supported " + err);
+								}
+								voxbone.WebRTC.audioScriptProcessor = voxbone.WebRTC.audioContext.createScriptProcessor(0, 1, 1);
+								var mic = voxbone.WebRTC.audioContext.createMediaStreamSource(streams[i]);
+								mic.connect(voxbone.WebRTC.audioScriptProcessor);
+								voxbone.WebRTC.audioScriptProcessor.connect(voxbone.WebRTC.audioContext.destination);
+
+								/* jshint loopfunc:true */
+								voxbone.WebRTC.audioScriptProcessor.onaudioprocess = function(event) {
+									var input = event.inputBuffer.getChannelData(0);
+									var i;
+									var sum = 0.0;
+									for (i = 0; i < input.length; ++i) {
+										sum += input[i] * input[i];
+									}
+									voxbone.WebRTC.localVolume = Math.sqrt(sum / input.length);
+								};
+								voxbone.WebRTC.localVolumeTimer = setInterval(function() {
+									var e = { localVolume : voxbone.WebRTC.localVolume.toFixed(2)};
+									voxbone.WebRTC.customEventHandler.localMediaVolume(e);
+								}, 200);
+								break;
+							}
+						}
+					},
+					'sending': function (e) {
+						voxbone.WebRTC.callid = e.request.call_id;
+						var  pc = voxbone.WebRTC.rtcSession.connection.pc;
+						var remoteUserId  = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
+						voxbone.WebRTC.callStats.addNewFabric(pc, remoteUserId, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
+					},
+					'progress': function (e) {
+						voxbone.WebRTC.customEventHandler.progress(e);
+					},
+					'failed': function (e) {
+						var pcObject;
+						var conferenceID = voxbone.WebRTC.callid;
+						var callStats = voxbone.WebRTC.callStats;
+
+						voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
+
+						if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined')
+							pcObject = voxbone.WebRTC.rtcSession.connection.pc;
+
+						switch(e.cause) {
+							case JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS:
+								if (typeof pcObject === 'object')
+									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.getUserMedia);
+								voxbone.WebRTC.customEventHandler.getUserMediaFailed(e);
+								break;
+
+							case JsSIP.C.causes.INCOMPATIBLE_SDP:
+							case JsSIP.C.causes.MISSING_SDP:
+								if (typeof pcObject === 'object')
+									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
+								break;
+
+							case JsSIP.C.causes.BYE:
+							case JsSIP.C.causes.CANCELED:
+							case JsSIP.C.causes.NO_ANSWER:
+							case JsSIP.C.causes.EXPIRES:
+							case JsSIP.C.causes.NO_ACK:
+							case JsSIP.C.causes.BUSY:
+							case JsSIP.C.causes.REJECTED:
+							case JsSIP.C.causes.REDIRECTED:
+							case JsSIP.C.causes.UNAVAILABLE:
+							case JsSIP.C.causes.NOT_FOUND:
+								if (typeof pcObject === 'object')
+									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
+								break;
+
+							// case JsSIP.C.causes.DIALOG_ERROR:
+							// case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
+							// case JsSIP.C.causes.RTP_TIMEOUT:
+							// case JsSIP.C.causes.SIP_FAILURE_CODE:
+							// case JsSIP.C.causes.REQUEST_TIMEOUT:
+							// case JsSIP.C.causes.CONNECTION_ERROR:
+							// case JsSIP.C.causes.INTERNAL_ERROR:
+							// case JsSIP.C.causes.ADDRESS_INCOMPLETE:
+							// case JsSIP.C.causes.AUTHENTICATION_ERROR:
+							default:
+								if (typeof pcObject === 'object')
+									callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
+								break;
+						}
+
+						voxbone.WebRTC.postLogsToServer();
+						voxbone.WebRTC.cleanUp();
+						voxbone.WebRTC.customEventHandler.failed(e);
+					},
+					'accepted': function (e) {
+						//voxbone.WebRTC.rtcSession = e.sender;
+						voxbone.WebRTC.customEventHandler.accepted(e);
+					},
+					'addstream': function (e) {
+						if(voxbone.WebRTC.allowVideo){
+							voxbone.WebRTC.initVideoElement(voxbone.WebRTC.videoComponentName, e.stream);
+						} else{
+							voxbone.WebRTC.initAudioElement(voxbone.WebRTC.audioComponentName, e.stream);
+						}
+					},
+					'confirmed': function (e) {
+						//Check if the customer has configured any dialer string, use that to bypass IVRs
+						if (voxbone.WebRTC.configuration.dialer_string !== undefined && voxbone.WebRTC.configuration.dialer_string.length > 0) {
+							var digitsPending = voxbone.WebRTC.configuration.dialer_string.split(',');
+							voxbone.WebRTC.sendPreConfiguredDtmf(digitsPending);
+						}
+					},
+					'ended': function (e) {
+						voxbone.WebRTC.postLogsToServer();
+						voxbone.WebRTC.cleanUp();
+						voxbone.WebRTC.customEventHandler.ended(e);
+					},
+				},
+				'extraHeaders': [],
+				'pcConfig': { rtcpMuxPolicy: "negotiate" },
+				'mediaConstraints': {'audio': true, 'video': voxbone.WebRTC.allowVideo}
+			};
+			if (this.configuration.stun_servers !== undefined || this.configuration.turn_servers !== undefined) {
+				var i;
+				var ice_servers = [];
+
+				for (i = 0; i < this.configuration.stun_servers.length; i++) {
+					ice_servers.push(this.configuration.stun_servers[i]);
+				}
+				for (i = 0; i < this.configuration.turn_servers.length; i++) {
+					ice_servers.push(this.configuration.turn_servers[i]);
+				}
+				options.pcConfig.iceServers = ice_servers;
+
+				/**
+				  * Stop the ice gathering process 10 seconds after we
+				  * we have atleast 1 relay candidate
+				*/
+				options.pcConfig.gatheringTimeoutAfterRelay = 5000;
+			}
+			options.pcConfig.iceCandidatePoolSize=10;
+
+
+			options.extraHeaders = headers;
+			if (this.phone === undefined) {
+				this.phone = new JsSIP.UA(this.configuration);
+				this.phone.once('connected', function() { voxbone.WebRTC.rtcSession = voxbone.WebRTC.phone.call(uri.toAor(), options);});
+				this.phone.on('newRTCSession', function(data) {
+					data.session.on('connecting', function(e) {
+						voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
+					});
+
+					data.session.on('reinvite', function (info) {
+						request = info.request;
+
+						var extraHeaders = ['Contact: ' + data.session.contact];
+						handleSessionTimersInIncomingRequest.call(data.session, request, extraHeaders);
+
+						request.reply(200, null, extraHeaders, null,
+							function () {
+								self.status = JsSIP.C.STATUS_WAITING_FOR_ACK;
+								setInvite2xxTimer.call(data.session, request, null);
+								setACKTimer.call(data.session);
+							}
+						);
+					});
+				});
+				this.phone.start();
+			} else {
+				this.phone.configuration = this.configuration;
+				this.rtcSession = this.phone.call(uri.toAor(), options);
+			}
+		},
+
+		/**
+		 * Checks if user is in an established
+                 * call or if a call attempt is in progress,
+		 * returns true if any of the above conditions
+		 * is true otherwise returns false
+		 *
+		 * @returns {boolean}
+		 */
+		isCallOpen : function() {
+			if (typeof voxbone.WebRTC.rtcSession.isEstablished === "function" && typeof voxbone.WebRTC.rtcSession.isInProgress === "function") {
+				if ((voxbone.WebRTC.rtcSession.isInProgress() === true) || (voxbone.WebRTC.rtcSession.isEstablished() === true)) {
+					return true;
+				}
+			}
+			return false;
+		},
+
+        sendDTMF : function(tone){
+            this.rtcSession.sendDTMF(tone);
+        },
+
+		/**
+		 * Terminate the WebRTC session
+		 */
+		hangup: function () {
+      if (this.rtcSession !== undefined) {
+				this.rtcSession.terminate();
+			}
+		},
+
+		/**
+		 * Indicates if the client microphone is muted or not
+		 */
+		isMuted: false,
+
+		/**
+		 * Mute microphone
+		 */
+		mute: function () {
+			var streams = this.rtcSession.connection.getLocalStreams();
+			for (var i = 0; i < streams.length; i++) {
+				for (var j = 0; j < streams[i].getAudioTracks().length; j++) {
+					streams[i].getAudioTracks()[j].enabled = false;
+				}
+			}
+			this.isMuted = true;
+			voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
+		},
+
+		/**
+		 * unmute microphone
+		 */
+		unmute: function () {
+			var streams = this.rtcSession.connection.getLocalStreams();
+			for (var i = 0; i < streams.length; i++) {
+				for (var j = 0; j < streams[i].getAudioTracks().length; j++) {
+					streams[i].getAudioTracks()[j].enabled = true;
+				}
+			}
+			this.isMuted = false;
+			voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
+		},
+
+		/**
+		 * voxbone handler for page unload
+		 * It will hangup any ongoing calls
+		 * and post the logs
+		 */
+		unloadHandler: function () {
+			if (voxbone.WebRTC.isCallOpen()) {
+					voxbone.Logger.loginfo("Page unloading while a call was in progress, hanging up");
+					voxbone.WebRTC.hangup();
+					voxbone.WebRTC.postLogsToServer();
+			} else if (voxbone.WebRTC.configuration.post_logs_nocall === true) {
+				/*Don't care if any calls were made, we still want logs*/
+				voxbone.WebRTC.postLogsToServer();
+			}
+
+		},
+		/**
+		 * Checks if the client browser supports WebRTC or not.
+		 *
+		 * @returns {boolean}
+		 */
+		isWebRTCSupported: function () {
+			if (!window.navigator.webkitGetUserMedia && !window.navigator.mozGetUserMedia) {
+				return false;
+			}
+			else {
+				var is_firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+				if (is_firefox) {
+					var patt = new RegExp("firefox/([0-9])+");
+					var patt2 = new RegExp("([0-9])+");
+					var user_agent = patt.exec(navigator.userAgent.toLowerCase())[0];
+					var version = patt2.exec(user_agent)[0];
+					if (version < 23) {
+						return false;
+					}
+				}
+
+				return true;
+			}
+		}
+	}
 });
