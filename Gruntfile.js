@@ -68,8 +68,8 @@ module.exports = function(grunt) {
           'src/*.js'
         ],
       options: {
-        globals: {
-        }
+        globals: {},
+        esversion: 6
       }
     }
   });

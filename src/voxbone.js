@@ -1,4 +1,4 @@
-var JsSIP, voxbone = voxbone || {};;
+var JsSIP, voxbone = voxbone || {};
 
 requirejs.config({
   paths: {
@@ -272,9 +272,19 @@ extend(voxbone, {
     localVolume: 0,
 
     /**
+     * remote media volume
+     */
+    remoteVolume: 0,
+
+    /**
      * The callback timer for local media volume
      */
     localVolumeTimer: undefined,
+
+    /**
+     * The callback timer for remote media volume
+     */
+    remoteVolumeTimer: undefined,
 
     /**
      * Timer used if customer wants to insert a add
@@ -285,13 +295,28 @@ extend(voxbone, {
     /**
      * The script processor for local media volume
      */
-    audioScriptProcessor: {},
+    localAudioScriptProcessor: {},
+
+    /**
+     * The script processor for remote media volume
+     */
+    remoteAudioScriptProcessor: {},
 
     /**
      * Used to bypass ping mechanism and enforce the POP to be used
      * If set to 'undefined' ping will be triggered and best pop will be set as preferedPop
      */
     preferedPop: undefined,
+
+    inboundCalling: false,
+
+    register: false,
+
+    username: null,
+
+    password: null,
+
+    onCall: null,
 
     /**
      * Configuration object use to hold authentication data as well as the list of Web Socket Servers.
@@ -335,12 +360,15 @@ extend(voxbone, {
         voxbone.Logger.logerror("Failed to access mic/camera");
       },
       'localMediaVolume': function(e) {},
+      'remoteMediaVolume': function (e) {},
       'failed': function(e) {},
       'ended': function(e) {},
       'authExpired': function(e) {},
       'getUserMediaAccepted': function(e) {
         voxbone.Logger.loginfo("local media accepted");
-      }
+      },
+      'connected': function(e) {},
+      'registered': function(e) {}
     },
 
     /**
@@ -359,7 +387,7 @@ extend(voxbone, {
      *
      * @param credentials credentials to be used against ephemeral auth server
      */
-    init: function(credentials) {
+    init: function(credentials, connectAndListen) {
       voxbone.Logger.loginfo('auth server: ' + this.authServerURL);
 
       var data = {
@@ -398,7 +426,12 @@ extend(voxbone, {
      * @param data the Data from voxbone ephemeral server to process
      */
     processAuthData: function(data) {
-      this.configuration.ws_servers = data.wss;
+      if (!(this.onCall instanceof Function)) {
+        this.configuration.ws_servers = data.wss;
+      } else if (!this.configuration.ws_servers) {
+        this.configuration.ws_servers = ['wss://workshop-gateway.voxbone.com'];
+      }
+
       this.configuration.stun_servers = data.stunServers;
       this.configuration.turn_servers = data.turnServers;
       this.configuration.webrtc_log = data.log;
@@ -406,17 +439,16 @@ extend(voxbone, {
       this.configuration.authorization_user = data.username;
       this.configuration.password = data.password;
 
-
       // If no prefered Pop is defined, ping and determine which one to prefer
-      if (typeof this.preferedPop === 'undefined') {
-        voxbone.Logger.loginfo("prefered pop undefined, pinging....");
-        this.pingServers = data.pingServers;
-        for (var i = 0; i < this.pingServers.length; i++) {
-          voxbone.Pinger.ping(i, this.pingServers[i]);
-        }
-      } else {
-        voxbone.Logger.loginfo("preferred pop already set to " + this.preferedPop);
-      }
+      // if (typeof this.preferedPop === 'undefined') {
+      //   voxbone.Logger.loginfo("prefered pop undefined, pinging....");
+      //   this.pingServers = data.pingServers;
+      //   for (var i = 0; i < this.pingServers.length; i++) {
+      //     voxbone.Pinger.ping(i, this.pingServers[i]);
+      //   }
+      // } else {
+      //   voxbone.Logger.loginfo("preferred pop already set to " + this.preferedPop);
+      // }
 
       var timeout = this.getAuthExpiration();
       if (timeout > 0) {
@@ -432,6 +464,12 @@ extend(voxbone, {
       };
       var localUserId = ((data.username).split(":"))[1];
       voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
+
+      if (this.onCall instanceof Function && !this.phone) {
+        this.inboundCalling = true;
+        this.configuration.register = true;
+        this.setupInboundCalling();
+      }
     },
 
     /**
@@ -545,7 +583,6 @@ extend(voxbone, {
         var postUrl = voxbone.WebRTC.configuration.webrtc_log;
         voxbone.Request.post(postUrl, data);
 
-
         /*
          *We are assuming that postCallRating is the
          *only function using previous_callid, so
@@ -579,27 +616,35 @@ extend(voxbone, {
     // Clean up the webrtc object, resets any ongoing timers and
     // other data specific to the current call
     cleanUp: function() {
-      if (voxbone.WebRTC.localVolumeTimer !== undefined) {
-        clearInterval(voxbone.WebRTC.localVolumeTimer);
-        voxbone.WebRTC.localVolumeTimer = undefined;
-      }
-
-      if (voxbone.WebRTC.audioScriptProcessor !== undefined) {
-        if (voxbone.WebRTC.audioContext !== undefined && voxbone.WebRTC.audioContext.destination !== undefined) {
-          voxbone.WebRTC.audioScriptProcessor.disconnect(voxbone.WebRTC.audioContext.destination);
+      ['local', 'remote'].forEach(function(key) {
+        if (voxbone.WebRTC[key + 'VolumeTimer'] !== undefined) {
+          clearInterval(voxbone.WebRTC[key + 'VolumeTimer']);
+          voxbone.WebRTC[key + 'VolumeTimer'] = undefined;
         }
-        voxbone.WebRTC.audioScriptProcessor = undefined;
-      }
+
+        var audioScriptProcessorName = key + 'AudioScriptProcessor';
+
+        if (voxbone.WebRTC[audioScriptProcessorName] !== undefined) {
+          if (voxbone.WebRTC.audioContext !== undefined && voxbone.WebRTC.audioContext.destination !== undefined)
+            voxbone.WebRTC[audioScriptProcessorName].disconnect(voxbone.WebRTC.audioContext.destination);
+
+          voxbone.WebRTC[audioScriptProcessorName] = undefined;
+        }
+      });
+
       if (voxbone.WebRTC.dtmfTimer !== undefined) {
         clearTimeout(voxbone.WebRTC.dtmfTimer);
         voxbone.WebRTC.dtmfTimer = undefined;
       }
+
       voxbone.WebRTC.cleanAudioElement(voxbone.WebRTC.audioComponentName);
       voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
       voxbone.WebRTC.callid = "";
       voxbone.WebRTC.webrtcLogs = "";
       voxbone.WebRTC.rtcSession = {};
-      delete voxbone.WebRTC.phone;
+
+      if (!voxbone.WebRTC.inboundCalling)
+        delete voxbone.WebRTC.phone;
     },
 
     /**
@@ -621,64 +666,59 @@ extend(voxbone, {
       return audio;
     },
 
-    /**
-     * Place a call on a given phone number.
-     * Prior to place the call, it will lookup for best possible POP to use
-     * and set the X-Voxbone-Pop header accordingly
-     *
-     * @param destPhone phone number to dial in E164 format.
-     */
-    call: function(destPhone) {
-      var uri = new JsSIP.URI('sip', destPhone, 'voxout.voxbone.com');
-      if (this.preferedPop === undefined) {
-        this.preferedPop = voxbone.Pinger.getBestPop().name;
+    monitorStreamVolume: function(type) {
+      type = type || 'local';
+      console.log('monitoring volume on ', type);
+
+      var getStreamFunctionName = (type === 'local' ? 'getLocalStreams' : 'getRemoteStreams');
+      var volumeLocationName = (type === 'local' ? 'localVolume' : 'remoteVolume');
+      var volumeLocationTimerName = (type === 'local' ? 'localVolumeTimer' : 'remoteVolumeTimer');
+      var customEventName = (type === 'local' ? 'localMediaVolume' : 'remoteMediaVolume');
+      var audioScriptProcessorName = (type === 'local' ? 'localAudioScriptProcessor' : 'remoteAudioScriptProcessor');
+
+      var streams = voxbone.WebRTC.rtcSession.connection[getStreamFunctionName]();
+      voxbone.Logger.loginfo("streams " + streams.length);
+      for (var i = 0; i < streams.length; i++) {
+        if (streams[i].getAudioTracks().length > 0) {
+          /*activate the local volume monitoring*/
+          try {
+            if (voxbone.WebRTC.audioContext === undefined)
+              voxbone.WebRTC.audioContext = new AudioContext();
+          } catch (e) {
+            voxbone.Logger.logerror("Web Audio API not supported " + e);
+          }
+
+          voxbone.WebRTC[audioScriptProcessorName] = voxbone.WebRTC.audioContext.createScriptProcessor(0, 1, 1);
+          var mic = voxbone.WebRTC.audioContext.createMediaStreamSource(streams[i]);
+          mic.connect(voxbone.WebRTC[audioScriptProcessorName]);
+          voxbone.WebRTC[audioScriptProcessorName].connect(voxbone.WebRTC.audioContext.destination);
+
+          voxbone.WebRTC[audioScriptProcessorName].onaudioprocess = function(event) {
+            var input = event.inputBuffer.getChannelData(0);
+            var i;
+            var sum = 0.0;
+            for (i = 0; i < input.length; ++i) {
+              sum += input[i] * input[i];
+            }
+            voxbone.WebRTC[volumeLocationName] = Math.sqrt(sum / input.length);
+          };
+
+          voxbone.WebRTC[volumeLocationTimerName] = setInterval(function() {
+            var e = {};
+            e[volumeLocationName] = voxbone.WebRTC[volumeLocationName].toFixed(2);
+            voxbone.WebRTC.customEventHandler[customEventName](e);
+          }, 200);
+
+          break;
+        }
       }
-      voxbone.Logger.loginfo("prefered pop: ", this.preferedPop);
+    },
 
-      var headers = [];
-      headers.push('X-Voxbone-Pop: ' + this.preferedPop);
-
-      if (this.context) {
-        headers.push('X-Voxbone-Context: ' + this.context);
-      }
-
+    getOptions: function() {
       var options = {
         'eventHandlers': {
+          //won't run for our inbound call'
           'peerconnection': function(e) {
-            var streams = e.peerconnection.getLocalStreams();
-            voxbone.Logger.loginfo("streams " + streams.length);
-            for (var i = 0; i < streams.length; i++) {
-              if (streams[i].getAudioTracks().length > 0) {
-                /*activate the local volume monitoring*/
-                try {
-                  if (voxbone.WebRTC.audioContext === undefined) {
-                    voxbone.WebRTC.audioContext = new AudioContext();
-                  }
-                } catch (err) {
-                  voxbone.Logger.logerror("Web Audio API not supported " + err);
-                }
-                voxbone.WebRTC.audioScriptProcessor = voxbone.WebRTC.audioContext.createScriptProcessor(0, 1, 1);
-                var mic = voxbone.WebRTC.audioContext.createMediaStreamSource(streams[i]);
-                mic.connect(voxbone.WebRTC.audioScriptProcessor);
-                voxbone.WebRTC.audioScriptProcessor.connect(voxbone.WebRTC.audioContext.destination);
-
-                /* jshint loopfunc:true */
-                voxbone.WebRTC.audioScriptProcessor.onaudioprocess = function(event) {
-                  var input = event.inputBuffer.getChannelData(0);
-                  var i;
-                  var sum = 0.0;
-                  for (i = 0; i < input.length; ++i) {
-                    sum += input[i] * input[i];
-                  }
-                  voxbone.WebRTC.localVolume = Math.sqrt(sum / input.length);
-                };
-                voxbone.WebRTC.localVolumeTimer = setInterval(function() {
-                  var e = { localVolume: voxbone.WebRTC.localVolume.toFixed(2) };
-                  voxbone.WebRTC.customEventHandler.localMediaVolume(e);
-                }, 200);
-                break;
-              }
-            }
           },
           'sending': function(e) {
             voxbone.WebRTC.callid = e.request.call_id;
@@ -693,10 +733,9 @@ extend(voxbone, {
             var pcObject;
             var conferenceID = voxbone.WebRTC.callid;
             var callStats = voxbone.WebRTC.callStats;
-
             voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
 
-            if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined')
+            if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined' && voxbone.WebRTC.rtcSession.connection)
               pcObject = voxbone.WebRTC.rtcSession.connection.pc;
 
             switch (e.cause) {
@@ -726,15 +765,15 @@ extend(voxbone, {
                   callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
                 break;
 
-                // case JsSIP.C.causes.DIALOG_ERROR:
-                // case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
-                // case JsSIP.C.causes.RTP_TIMEOUT:
-                // case JsSIP.C.causes.SIP_FAILURE_CODE:
-                // case JsSIP.C.causes.REQUEST_TIMEOUT:
-                // case JsSIP.C.causes.CONNECTION_ERROR:
-                // case JsSIP.C.causes.INTERNAL_ERROR:
-                // case JsSIP.C.causes.ADDRESS_INCOMPLETE:
-                // case JsSIP.C.causes.AUTHENTICATION_ERROR:
+              // case JsSIP.C.causes.DIALOG_ERROR:
+              // case JsSIP.C.causes.BAD_MEDIA_DESCRIPTION:
+              // case JsSIP.C.causes.RTP_TIMEOUT:
+              // case JsSIP.C.causes.SIP_FAILURE_CODE:
+              // case JsSIP.C.causes.REQUEST_TIMEOUT:
+              // case JsSIP.C.causes.CONNECTION_ERROR:
+              // case JsSIP.C.causes.INTERNAL_ERROR:
+              // case JsSIP.C.causes.ADDRESS_INCOMPLETE:
+              // case JsSIP.C.causes.AUTHENTICATION_ERROR:
               default:
                 if (typeof pcObject === 'object')
                   callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
@@ -746,10 +785,15 @@ extend(voxbone, {
             voxbone.WebRTC.customEventHandler.failed(e);
           },
           'accepted': function(e) {
-            //voxbone.WebRTC.rtcSession = e.sender;
+            // if (!voxbone.WebRTC.inboundCalling)
+            //   voxbone.WebRTC.rtcSession = e.sender;
+
             voxbone.WebRTC.customEventHandler.accepted(e);
           },
           'addstream': function(e) {
+            voxbone.WebRTC.monitorStreamVolume('local');
+            voxbone.WebRTC.monitorStreamVolume('remote');
+
             if (voxbone.WebRTC.allowVideo) {
               voxbone.WebRTC.initVideoElement(voxbone.WebRTC.videoComponentName, e.stream);
             } else {
@@ -767,22 +811,24 @@ extend(voxbone, {
             voxbone.WebRTC.postLogsToServer();
             voxbone.WebRTC.cleanUp();
             voxbone.WebRTC.customEventHandler.ended(e);
-          },
+          }
         },
         'extraHeaders': [],
         'pcConfig': { rtcpMuxPolicy: "negotiate" },
         'mediaConstraints': { 'audio': true, 'video': voxbone.WebRTC.allowVideo }
       };
+
       if (this.configuration.stun_servers !== undefined || this.configuration.turn_servers !== undefined) {
-        var i;
         var ice_servers = [];
 
         for (i = 0; i < this.configuration.stun_servers.length; i++) {
           ice_servers.push(this.configuration.stun_servers[i]);
         }
+
         for (i = 0; i < this.configuration.turn_servers.length; i++) {
           ice_servers.push(this.configuration.turn_servers[i]);
         }
+
         options.pcConfig.iceServers = ice_servers;
 
         /**
@@ -793,8 +839,99 @@ extend(voxbone, {
       }
       options.pcConfig.iceCandidatePoolSize = 10;
 
+      return options;
+    },
 
+    /*
+     *
+     */
+
+    setupInboundCalling: function() {
+
+      var socket = new JsSIP.WebSocketInterface(this.configuration.ws_servers[0]);
+      socket.via_transport = "tcp";
+
+      //hack for now, dont want to delete ws_servers for this.configuration but want to not pass it in
+      var config = {};
+      var authHeaders = [];
+
+      extend(config, this.configuration);
+      delete config.ws_servers;
+
+      config.sockets = [socket];
+
+      voxbone.WebRTC.phone = new JsSIP.UA(config);
+
+      if (authHeaders.length)
+        voxbone.WebRTC.phone.registrator().setExtraHeaders(authHeaders);
+
+      voxbone.WebRTC.phone.on('connected', function(e) {
+        voxbone.WebRTC.customEventHandler.connected(e);
+        voxbone.Logger.loginfo("connected to websocket");
+      });
+
+      voxbone.WebRTC.phone.on('registered', function(e) {
+        voxbone.WebRTC.customEventHandler.registered(e);
+      });
+
+      voxbone.WebRTC.phone.on('newRTCSession', function(data) {
+        //we have a new call so ask our onCall function if we want to accept it
+        if (data.originator === 'remote') {
+
+          voxbone.WebRTC.rtcSession = data.session;
+          var options = voxbone.WebRTC.getOptions();
+
+          Object.keys(options.eventHandlers).forEach(function(eventName) {
+            data.session.on(eventName, options.eventHandlers[eventName]);
+          });
+
+          data.session.on('connecting', function(e) {
+            voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
+          });
+
+          var handleCall = function (continueCall) {
+            if (continueCall) {
+              data.session.answer({
+                'extraHeaders': options.extraHeaders,
+                'pcConfig': options.pcConfig,
+                'mediaConstraints': options.mediaConstraints
+              });
+            } else {
+              data.session.terminate();
+            }
+          };
+
+          voxbone.WebRTC.onCall(data, handleCall);
+        }
+      });
+
+      voxbone.WebRTC.phone.start();
+    },
+
+    /**
+     * Place a call on a given phone number.
+     * Prior to place the call, it will lookup for best possible POP to use
+     * and set the X-Voxbone-Pop header accordingly
+     *
+     * @param destPhone phone number to dial in E164 format.
+     */
+    call: function(destPhone) {
+      var uri = new JsSIP.URI('sip', destPhone, 'voxout.voxbone.com');
+
+      if (this.preferedPop === undefined)
+        this.preferedPop = voxbone.Pinger.getBestPop().name;
+
+      voxbone.Logger.loginfo("prefered pop: ", this.preferedPop);
+
+      var headers = [];
+      headers.push('X-Voxbone-Pop: ' + this.preferedPop);
+
+      if (this.context)
+        headers.push('X-Voxbone-Context: ' + this.context);
+
+      var options = voxbone.WebRTC.getOptions();
       options.extraHeaders = headers;
+
       if (this.phone === undefined) {
         this.phone = new JsSIP.UA(this.configuration);
         this.phone.once('connected', function() { voxbone.WebRTC.rtcSession = voxbone.WebRTC.phone.call(uri.toAor(), options); });
@@ -818,7 +955,9 @@ extend(voxbone, {
             );
           });
         });
+
         this.phone.start();
+
       } else {
         this.phone.configuration = this.configuration;
         this.rtcSession = this.phone.call(uri.toAor(), options);
