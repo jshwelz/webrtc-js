@@ -1000,31 +1000,54 @@ extend(voxbone, {
     isMuted: false,
 
     /**
-     * Mute microphone
+     * Indicates if the remote audio is muted or not
      */
-    mute: function() {
-      var streams = this.rtcSession.connection.getLocalStreams();
+    isRemoteMuted: false,
+
+    /**
+     * Mute source
+     */
+    mute: function(source) {
+      var streams;
+
+      if (!source || source !== 'remote') {
+        streams = this.rtcSession.connection.getLocalStreams();
+        this.isMuted = true;
+        voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
+      } else {
+        streams = this.rtcSession.connection.getRemoteStreams();
+        this.isRemoteMuted = true;
+      }
+
       for (var i = 0; i < streams.length; i++) {
         for (var j = 0; j < streams[i].getAudioTracks().length; j++) {
           streams[i].getAudioTracks()[j].enabled = false;
         }
       }
-      this.isMuted = true;
-      voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
+
     },
 
     /**
-     * unmute microphone
+     * unmute source
      */
-    unmute: function() {
-      var streams = this.rtcSession.connection.getLocalStreams();
+    unmute: function(source) {
+      var streams;
+
+      if (!source || source !== 'remote') {
+        streams = this.rtcSession.connection.getLocalStreams();
+        this.isMuted = true;
+        voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
+      } else {
+        streams = this.rtcSession.connection.getRemoteStreams();
+        this.isRemoteMuted = true;
+      }
+
       for (var i = 0; i < streams.length; i++) {
         for (var j = 0; j < streams[i].getAudioTracks().length; j++) {
           streams[i].getAudioTracks()[j].enabled = true;
         }
       }
-      this.isMuted = false;
-      voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
+
     },
 
     /**
