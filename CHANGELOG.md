@@ -1,5 +1,8 @@
 # Change Log
 
+## 2.1.7 - March 2017
+* Fix for #40. Add a redirect service to use either Voxbone's or Click2vox.io backup
+
 ## 2.1.6 - February 2017
 * Fix for #63. Removing socket.io
 * Fix for #68. Send DTMF tones in the right event
