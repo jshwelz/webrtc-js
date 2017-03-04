@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.2.0 - March 2017
+
+* #64. Adding inbound features
+* #74. Moving dependencies to RequireJS
+
 ## 2.1.7 - March 2017
 * Fix for #40. Add a redirect service to use either Voxbone's or Click2vox.io backup
 

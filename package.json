@@ -1,9 +1,9 @@
 {
   "name": "voxbone",
-  "version": "2.1.7",
+  "version": "2.2.0",
   "private": true,
   "engines": {
-    "node": "6.9.5"
+    "node": "^6.10.0"
   },
   "devDependencies": {
     "grunt": "^1.0.1",

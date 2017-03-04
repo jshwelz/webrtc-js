@@ -15,7 +15,7 @@ See our [changelog](https://github.com/voxbone-workshop/webrtc-js/blob/master/CH
 
 Voxbone provides the following reference implementations built on top of webrtc-js:
 
-* [Click2Call Demo](https://developers.voxbone.com/webrtc-editor/) - view and edit the demo code 
+* [Click2Call Demo](https://developers.voxbone.com/webrtc-editor/) - view and edit the demo code
 * [click2vox.com](https://click2vox.com) - create a free click-to-call button with widget code for any SIP URI
 * Voxbone Customer Portal [widget generator](https://developers.voxbone.com/how-to/setup-webrtc/) - create a click-to-call button & pop-up dialer for any Voxbone DID
 
@@ -131,6 +131,10 @@ Please note that no other headers are forwarded by Voxbone.
 
 ## Calling
 
+### Making and receiving a call
+
+At the moment you can only do one or the other, make a call or receive a call, you can not do both
+
 ####Call establishment####
 Once you're fully set up, you can now establish a call to a given number using
 ```javascript
@@ -143,6 +147,29 @@ display name of the caller can be customized using
 voxbone.WebRTC.configuration.display_name = "a custom display name";
 ```
 Note that the above has to be performed before call is established.
+
+#### Receiving a Call ####
+
+Because this is an alpha feature, there are a few options you'll need to set in order to use the feature.
+
+The first two are your username and password so that we can do a `REGISTER` request to the end SIP gateway.
+
+```
+voxbone.WebRTC.username = 'a-username-string';
+voxbone.WebRTC.password = 'a-super-secret-password';
+```
+
+You also need to pass in a function that decides whether or not to accept the call or not. This function takes a data argument which contains information about the call and a callback. The Callback takes a true or false parameter to accept or decline the inbound call. In the example below we immediately call the callback with the true argument but because its a callback function, you can do this asynchronously after doing any kind of logic you want - a HTTP call, waiting for something to happen within the page such as a click on an accept button.
+
+```
+voxbone.WebRTC.onCall = function (data, cb) {
+  console.log('recieved a call');
+  cb(true);
+}
+
+```
+
+### Methods available during a call
 
 video and audio html element will automatically gets added to the html document upon call establishment.
 If you want to avoid defaults elements to be added the page and feed your own element, you can set the ids of these element.
