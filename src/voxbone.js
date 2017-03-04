@@ -237,12 +237,12 @@ extend(voxbone, {
     /**
      * URL of voxbone ephemeral auth server
      */
-    authServerURL: 'https://webrtc.voxbone.com/rest/authentication/createToken',
+    authServerURL: 'https://cdn.voxbone.com/authentication/createToken',
 
     /**
      * URL of voxbone ephemeral auth server for basic auth
      */
-    basicAuthServerURL: 'https://webrtc.voxbone.com/rest/authentication/basicToken',
+    basicAuthServerURL: 'https://cdn.voxbone.com/authentication/basicToken',
 
     /**
      * Blob containing the logs for a webrtc session
@@ -394,6 +394,7 @@ extend(voxbone, {
         'username': credentials.username,
         'key': credentials.key,
         'expires': credentials.expires,
+        'timestamp': Date.now(),
         'jsonp': 'voxbone.WebRTC.processAuthData'
       };
 
@@ -411,6 +412,7 @@ extend(voxbone, {
       var data = {
         'username': username,
         'key': key,
+        'timestamp': Date.now(),
         'jsonp': 'voxbone.WebRTC.processAuthData'
       };
 
