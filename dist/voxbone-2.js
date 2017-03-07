@@ -1,5 +1,5 @@
 /*!
- * @license Voxbone v2.2.0
+ * @license Voxbone v2.2.1
  * Copyright 2017 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//** vim: et:ts=4:sw=4:sts=4
@@ -2728,6 +2728,7 @@ extend(voxbone, {
       'failed': function(e) {},
       'ended': function(e) {},
       'authExpired': function(e) {},
+      'readyToCall': function(e) {},
       'getUserMediaAccepted': function(e) {
         voxbone.Logger.loginfo("local media accepted");
       },
@@ -2836,6 +2837,8 @@ extend(voxbone, {
         this.configuration.register = true;
         this.setupInboundCalling();
       }
+
+      this.customEventHandler.readyToCall();
     },
 
     /**
@@ -3401,11 +3404,11 @@ extend(voxbone, {
 
       if (!source || source !== 'remote') {
         streams = this.rtcSession.connection.getLocalStreams();
-        this.isMuted = true;
+        this.isMuted = false;
         voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
       } else {
         streams = this.rtcSession.connection.getRemoteStreams();
-        this.isRemoteMuted = true;
+        this.isRemoteMuted = false;
       }
 
       for (var i = 0; i < streams.length; i++) {
@@ -3430,8 +3433,8 @@ extend(voxbone, {
         /*Don't care if any calls were made, we still want logs*/
         voxbone.WebRTC.postLogsToServer();
       }
-
     },
+
     /**
      * Checks if the client browser supports WebRTC or not.
      *

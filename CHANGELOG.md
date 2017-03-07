@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.2.1 - March 2017
+
+* #83. Fixes unmute event exposed variable
+* #85. Add "Ready To Call" event
+
 ## 2.2.0 - March 2017
 
 * #64. Adding inbound features
