@@ -7,7 +7,7 @@
 
 ## 2.2.0 - March 2017
 
-* #64. Adding inbound features
+* #64. Adding features to answer incoming calls
 * #74. Moving dependencies to RequireJS
 
 ## 2.1.7 - March 2017
