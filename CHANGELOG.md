@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.2.2 - March 2017
+
+* #91. Fixing Callstats library to v3.17.10
+
 ## 2.2.1 - March 2017
 
 * #83. Fixes unmute event exposed variable
