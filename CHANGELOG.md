@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.2.3 - May 2017
+
+* #101. Fixing Callstats library to v3.19.14
+
 ## 2.2.2 - March 2017
 
 * #91. Fixing Callstats library to v3.17.10

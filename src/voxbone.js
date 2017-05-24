@@ -2,7 +2,10 @@ var JsSIP, voxbone = voxbone || {};
 
 requirejs.config({
   paths: {
-    callstats: "//cdn.voxbone.com/lib/callstats-3.17.10.min",
+    callstats: [
+      "//cdn.voxbone.com/lib/callstats-3.19.14.min",
+      "//api.callstats.io/static/callstats-3.19.14.min"
+    ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
       "//cdn.bootcss.com/jssip/2.0.6/jssip.min"
