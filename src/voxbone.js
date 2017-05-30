@@ -445,17 +445,6 @@ extend(voxbone, {
       this.configuration.authorization_user = data.username;
       this.configuration.password = data.password;
 
-      // If no prefered Pop is defined, ping and determine which one to prefer
-      // if (typeof this.preferedPop === 'undefined') {
-      //   voxbone.Logger.loginfo("prefered pop undefined, pinging....");
-      //   this.pingServers = data.pingServers;
-      //   for (var i = 0; i < this.pingServers.length; i++) {
-      //     voxbone.Pinger.ping(i, this.pingServers[i]);
-      //   }
-      // } else {
-      //   voxbone.Logger.loginfo("preferred pop already set to " + this.preferedPop);
-      // }
-
       var timeout = this.getAuthExpiration();
       if (timeout > 0) {
         voxbone.Logger.loginfo("Credential expires in " + timeout + " seconds");
@@ -471,10 +460,23 @@ extend(voxbone, {
       var localUserId = ((data.username).split(":"))[1];
       voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
 
+      // This is an inbound call
       if (this.onCall instanceof Function && !this.phone) {
         this.inboundCalling = true;
         this.configuration.register = true;
         this.setupInboundCalling();
+      } else {
+        // This is an outbound call
+        // If no prefered Pop is defined, ping and determine which one to prefer
+        if (typeof this.preferedPop === 'undefined') {
+          voxbone.Logger.loginfo("prefered pop undefined, pinging....");
+          this.pingServers = data.pingServers;
+          for (var i = 0; i < this.pingServers.length; i++) {
+            voxbone.Pinger.ping(i, this.pingServers[i]);
+          }
+        } else {
+          voxbone.Logger.loginfo("preferred pop already set to " + this.preferedPop);
+        }
       }
 
       this.customEventHandler.readyToCall();
@@ -485,13 +487,11 @@ extend(voxbone, {
      *
      * @returns time until expration in seconds
      */
-
     getAuthExpiration: function(data) {
       var now = Math.floor((new Date()).getTime() / 1000);
       var fields = this.configuration.authorization_user.split(/:/);
       return fields[0] - now;
     },
-
 
     /**
      * Check if the document contains an audio element with the provided id.

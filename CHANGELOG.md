@@ -3,6 +3,7 @@
 ## 2.2.3 - May 2017
 
 * #101. Fixing Callstats library to v3.19.14
+* #100. Putting POP selection back in
 
 ## 2.2.2 - March 2017
 
