@@ -3,8 +3,8 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     callstats: [
-      "//cdn.voxbone.com/lib/callstats-3.19.14.min",
-      "//api.callstats.io/static/callstats-3.19.14.min"
+      "//cdn.voxbone.com/lib/callstats-3.19.17.min",
+      "//api.callstats.io/static/callstats-3.19.17.min"
     ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
@@ -929,7 +929,7 @@ extend(voxbone, {
       if (this.preferedPop === undefined)
         this.preferedPop = voxbone.Pinger.getBestPop().name;
 
-      voxbone.Logger.loginfo("prefered pop: ", this.preferedPop);
+      voxbone.Logger.loginfo("prefered pop: " + this.preferedPop);
 
       var headers = [];
       headers.push('X-Voxbone-Pop: ' + this.preferedPop);
