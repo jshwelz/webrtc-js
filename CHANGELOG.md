@@ -1,5 +1,11 @@
 # Change Log
 
+## 2.2.3 - May 2017
+
+* #105. Fixes Voxbone Logger not tracing `Preferred Pop`
+* #101. Fixing Callstats library to v3.19.17
+* #100. Putting POP selection back in
+
 ## 2.2.2 - March 2017
 
 * #91. Fixing Callstats library to v3.17.10
