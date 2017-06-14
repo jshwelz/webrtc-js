@@ -38,7 +38,7 @@ Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit
 # File references
 Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
 
-* use [//cdn.voxbone.com/voxbone/voxbone-2.2.2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.2.min.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js) to access a specific patch release
 * use [//cdn.voxbone.com/voxbone/voxbone-2.2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.min.js) to access a minor version release with the latest patches
 * use [//cdn.voxbone.com/voxbone/voxbone-2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.min.js) to access a major version release with the latest updates
 
