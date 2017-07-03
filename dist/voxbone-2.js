@@ -1,5 +1,5 @@
 /*!
- * @license Voxbone v2.2.3
+ * @license Voxbone v2.2.4
  * Copyright 2017 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//** vim: et:ts=4:sw=4:sts=4
@@ -2367,8 +2367,8 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     callstats: [
-      "//cdn.voxbone.com/lib/callstats-3.19.17.min",
-      "//api.callstats.io/static/callstats-3.19.17.min"
+      "//cdn.voxbone.com/lib/callstats-3.20.2.min",
+      "//api.callstats.io/static/callstats-3.20.2.min"
     ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
