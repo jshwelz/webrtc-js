@@ -1,6 +1,6 @@
 {
-  "name": "voxbone-beta",
-  "version": "3.0",
+  "name": "voxbone",
+  "version": "3.0.0-b",
   "private": true,
   "engines": {
     "node": "^6.10.0"
