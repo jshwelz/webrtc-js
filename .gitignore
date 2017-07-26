@@ -20,5 +20,8 @@ node_modules
 # excluding bower related directories
 bower_components
 
+# User-specific idea stuff:
+.idea/
+
 conf/credentials.json
 .env

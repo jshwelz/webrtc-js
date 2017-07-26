@@ -2921,7 +2921,7 @@ extend(voxbone, {
           digit = digitsPending[0];
         }
         digitsPending = digitsPending.slice(1, digitsPending.length);
-        if (digit !== undefined) {
+        if (String(' ABCD0123456789#*').indexOf(digit) > 0) {
           var d = Date.now();
           voxbone.WebRTC.rtcSession.sendDTMF(digit);
           digit_sent = true;
