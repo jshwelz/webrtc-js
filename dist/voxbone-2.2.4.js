@@ -2367,8 +2367,8 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     callstats: [
-      "//cdn.voxbone.com/lib/callstats-3.20.2.min",
-      "//api.callstats.io/static/callstats-3.20.2.min"
+      "//cdn.voxbone.com/lib/callstats-3.21.1.min",
+      "//api.callstats.io/static/callstats-3.21.1.min"
     ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
