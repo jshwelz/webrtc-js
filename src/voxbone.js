@@ -3,8 +3,8 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     callstats: [
-      "//cdn.voxbone.com/lib/callstats-3.19.17.min",
-      "//api.callstats.io/static/callstats-3.19.17.min"
+      "//cdn.voxbone.com/lib/callstats-3.21.1.min",
+      "//api.callstats.io/static/callstats-3.21.1.min"
     ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
@@ -557,7 +557,7 @@ extend(voxbone, {
           digit = digitsPending[0];
         }
         digitsPending = digitsPending.slice(1, digitsPending.length);
-        if (digit !== undefined) {
+        if (String(' ABCD0123456789#*').indexOf(digit) > 0) {
           var d = Date.now();
           voxbone.WebRTC.rtcSession.sendDTMF(digit);
           digit_sent = true;
