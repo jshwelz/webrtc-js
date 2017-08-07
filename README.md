@@ -1,3 +1,5 @@
+*Build Status* _(master branch)_: [![CircleCI](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/master.svg?style=svg)](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/master)
+
 # Introduction
 webrtc-js is a Voxbone project that allows web users to call a SIP address or Voxbone SIP Trunk from WebRTC-enabled browsers. The library is focused on click-to-call use cases. See below is information on how this library works. More information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
 
