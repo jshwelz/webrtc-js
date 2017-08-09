@@ -110,6 +110,7 @@ describe("Voxbone before on call", function() {
     describe("and when valid DID", function() {
 
       xit("should be able to call", function (done) {
+        //FIXME
         console.info('testing able to call, waiting 3s...');
         setTimeout(function () {
           console.info('call open: '+voxbone.WebRTC.isCallOpen());
