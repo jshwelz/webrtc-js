@@ -20,5 +20,14 @@ node_modules
 # excluding bower related directories
 bower_components
 
+#coverage report
+coverage
+
+# User-specific idea stuff:
+.idea/
+
 conf/credentials.json
 .env
+
+#Idea IDE
+.idea

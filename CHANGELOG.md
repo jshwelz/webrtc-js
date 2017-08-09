@@ -1,5 +1,10 @@
 # Change Log
 
+## 2.2.4 - July 2017
+
+* #117. - Validate DTMF digit is valid
+* #112. - adding callstats 3.21.1
+
 ## 2.2.3 - May 2017
 
 * #105. Fixes Voxbone Logger not tracing `Preferred Pop`

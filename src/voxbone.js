@@ -1,17 +1,18 @@
 function Voxbone(config) {
 
-  var io, frontend, adapter, voxbone = {};
+  var voxbone = {};
+  var io, frontend, adapter;
 
   requirejs.config({
     paths: {
       io: "//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io",
       adapter: [
-        "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.14.3/adapter.min",
-        "//cdn.temasys.com.sg/adapterjs/0.14.3/adapter.min"
+        "//cdn.temasys.com.sg/adapterjs/0.14.3/adapter.min",
+        "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.14.3/adapter.min"
       ],
       callstats: [
-        "//cdn.voxbone.com/lib/callstats-3.19.17.min",
-        "//api.callstats.io/static/callstats-3.19.17.min"
+        "//cdn.voxbone.com/lib/callstats-3.21.1.min",
+        "//api.callstats.io/static/callstats-3.21.1.min"
       ]
     }
   });
@@ -124,6 +125,9 @@ function Voxbone(config) {
 
   }
 
+  /**
+   * HTTP requests Logic
+   */
   extend(voxbone, {
     Request: {
       param: function (data) {
@@ -347,7 +351,7 @@ function Voxbone(config) {
        */
       rtcSession: {
         connection: {localStreams: [], remoteStreams: []},
-        status: ""
+        status: 0
       },
       /**
        * SIP call id for current session
@@ -528,34 +532,17 @@ function Voxbone(config) {
           that.configuration.connectionId = data.connectionId;
           that.configuration.username = data.username;
         } else if (!data.error) {
-          that.configuration.ws_servers = data.wss;
           that.configuration.stun_servers = data.stunServers;
           that.configuration.turn_servers = data.turnServers;
           that.configuration.webrtc_log = data.log;
-
           that.configuration.username = data.username;
           that.configuration.authuser = data.username;
           that.configuration.secret = data.password;
-          // If no prefered Pop is defined, ping and determine which one to prefer
-          if (typeof that.preferedPop === 'undefined') {
-            voxbone.Logger.loginfo("prefered pop undefined, pinging....");
-            this.pingServers = data.pingServers;
-            for (var i = 0; i < Object.keys(this.pingServers).length; i++) {
-              var pop_key = Object.keys(this.pingServers)[i];
-              voxbone.Pinger.ping(pop_key, this.pingServers[pop_key]);
-            }
-          } else {
-            voxbone.Logger.loginfo("preferred pop already set to " + that.preferedPop);
-          }
-          var timeout = that.getAuthExpiration();
-          if (timeout > 0) {
-            voxbone.Logger.loginfo("Credential expires in " + timeout + " seconds");
-            // refresh at 75% of duration
-            setTimeout(that.customEventHandler.authExpired, timeout * 750);
-          }
-
+          //if outbound call
+          if (voxbone.WebRTC.onCall instanceof Function !== true)
+            getPreferedPop();
+          authTimeout(that);
           var callstats_credentials = data.callStatsCredentials;
-
           var csInitCallback = function (csError, csMsg) {
             voxbone.Logger.loginfo("callStats Status: errCode = " + csError + " Msg = " + csMsg);
           };
@@ -564,6 +551,7 @@ function Voxbone(config) {
         } else {
           this.customEventHandler.failed({cause: data.error});
         }
+
         if (voxbone.WebRTC.onCall instanceof Function && !voxbone.WebRTC.phone) {
           this.inboundCalling = true;
           this.configuration.register = true;
@@ -574,7 +562,30 @@ function Voxbone(config) {
             }
           });
         }
+
         this.customEventHandler.readyToCall();
+
+        function getPreferedPop() {
+          if (typeof that.preferedPop === 'undefined') {
+            voxbone.Logger.loginfo("prefered pop undefined, pinging....");
+            this.pingServers = data.pingServers;
+            for (var i = 0; i < Object.keys(this.pingServers).length; i++) {
+              var pop_key = Object.keys(this.pingServers)[i];
+              voxbone.Pinger.ping(pop_key, this.pingServers[pop_key]);
+            }
+          } else {
+            voxbone.Logger.loginfo("preferred pop already set to " + that.preferedPop);
+          }
+        }
+
+        function authTimeout(that){
+          var timeout = that.getAuthExpiration();
+          if (timeout > 0) {
+            voxbone.Logger.loginfo("Credential expires in " + timeout + " seconds");
+            // refresh at 75% of duration
+            setTimeout(that.customEventHandler.authExpired, timeout * 750);
+          }
+        }
       },
 
       /**
@@ -638,7 +649,6 @@ function Voxbone(config) {
         var digit;
         var pause = 0;
         var digit_sent = false;
-
         if (voxbone.WebRTC.dtmfTimer !== undefined) {
           clearTimeout(voxbone.WebRTC.dtmfTimer);
           voxbone.WebRTC.dtmfTime = undefined;
@@ -878,7 +888,7 @@ function Voxbone(config) {
                 case 'Error calling: 404 Not Found':
                   if (typeof pcObject === 'object')
                     callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
-                  e.cause = voxbone.C.causes.NOT_FOUND;
+                  e.cause = 'Not Found';
                   break;
 
                 default:
@@ -906,6 +916,7 @@ function Voxbone(config) {
               }
             },
             'confirmed': function (e) {
+              voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_CONFIRMED;
               //Check if the customer has configured any dialer string, use that to bypass IVRs
               if (voxbone.WebRTC.configuration.dialer_string !== undefined && voxbone.WebRTC.configuration.dialer_string.length > 0) {
                 var digitsPending = voxbone.WebRTC.configuration.dialer_string.split(',');
@@ -923,17 +934,17 @@ function Voxbone(config) {
         };
 
         if (this.configuration.stun_servers !== undefined || this.configuration.turn_servers !== undefined) {
-          var ice_servers = [];
+          var iceServers = [];
 
           for (i = 0; i < this.configuration.stun_servers.length; i++) {
-            ice_servers.push(this.configuration.stun_servers[i]);
+            iceServers.push(this.configuration.stun_servers[i]);
           }
 
           for (i = 0; i < this.configuration.turn_servers.length; i++) {
-            ice_servers.push(this.configuration.turn_servers[i]);
+            iceServers.push(this.configuration.turn_servers[i]);
           }
-
-          options.pcConfig.iceServers = ice_servers;
+          // We limit ice candidates to 4 as mozilla throws an error when using 5 or more
+          options.pcConfig.iceServers = {iceServers: iceServers.slice(0, 4)};
 
           /**
            * Stop the ice gathering process 10 seconds after we
@@ -953,7 +964,6 @@ function Voxbone(config) {
       setupInboundCalling: function (details, callback) {
         // Registering an account
         callback = (typeof callback == "function") ? callback : voxbone.noop;
-        console.log('inbound calling!');
         voxbone.Logger.loginfo(details);
         // We need a wrapper first
         if (wrapper) {
@@ -1029,61 +1039,28 @@ function Voxbone(config) {
        * Prior to place the call, it will lookup for best possible POP to use
        * and set the X-Voxbone-Pop header accordingly
        *
-       * @param destPhone phone number to dial in E164 format.
+       * @params
+       * destPhone phone number to dial in E164 format.
+       * allowVideo will start a call with video
        */
       call: function (destPhone, allowVideo, callback) {
 
-        console.log('start call to ' + destPhone);
-
-        if (voxbone.preferedPop === undefined) {
-          voxbone.preferedPop = voxbone.Pinger.getBestPop().name;
+        if (voxbone.WebRTC.isCallOpen()) {
+          voxbone.Logger.loginfo('Already in a call');
+          return;
         }
-
-        voxbone.Logger.loginfo("prefered pop: "+ voxbone.preferedPop);
+        console.log('start call to ' + destPhone);
+        if (voxbone.WebRTC.preferedPop === undefined) {
+          voxbone.WebRTC.preferedPop = voxbone.Pinger.getBestPop().name;
+        }
+        voxbone.Logger.loginfo("prefered pop: "+ voxbone.WebRTC.preferedPop);
 
         var headers = {};
-        headers['X-Voxbone-Pop'] = voxbone.preferedPop;
-
+        headers['X-Voxbone-Pop'] = voxbone.WebRTC.preferedPop;
         if (this.context)
           headers['X-Voxbone-Context'] = this.context;
 
         voxbone.WebRTC.configuration.headers = headers;
-        // var element = {}, cart = [];
-        // element.id = id;
-        // element.quantity = quantity;
-        // cart.push({element: element});
-        //OLD WAY using io
-        // (...)
-        // if (this.phone === undefined) {
-        // 	this.phone = new io.UA(this.configuration);
-        // 	this.phone.once('connected', function() { voxbone.rtcSession = voxbone.phone.call(uri.toAor(), options); });
-        // 	this.phone.on('newRTCSession', function(data) {
-        // 		data.session.on('connecting', function(e) {
-        // 			voxbone.customEventHandler.getUserMediaAccepted(e);
-        // 		});
-        //
-        // 		data.session.on('reinvite', function(info) {
-        // 			request = info.request;
-        //
-        // 			var extraHeaders = ['Contact: ' + data.session.contact];
-        // 			handleSessionTimersInIncomingRequest.call(data.session, request, extraHeaders);
-        //
-        // 			request.reply(200, null, extraHeaders, null,
-        // 				function() {
-        // 					self.status = io.C.STATUS_WAITING_FOR_ACK;
-        // 					setInvite2xxTimer.call(data.session, request, null);
-        // 					setACKTimer.call(data.session);
-        // 				}
-        // 			);
-        // 		});
-        // 	});
-        //
-        // 	this.phone.start();
-        //
-        // } else {
-        // 	this.phone.configuration = this.configuration;
-        // 	this.rtcSession = this.phone.call(uri.toAor(), options);
-        // }
         voxbone.WebRTC.configuration.guestUser = true;
         var callee = 'sip:' + destPhone + '@voxout.voxbone.com';
         var authuser = voxbone.WebRTC.configuration.authuser;
@@ -1108,124 +1085,15 @@ function Voxbone(config) {
             registerViaWrapper(voxbone.WebRTC.configuration, function (err, res) {
               if (err)
                 unregisterWrapper();
-              // callback(err, res);
               voxbone.WebRTC.rtcSession.isInProgress = true;
               that.on('consent', function (accept) {
                 if (accept) {
                   voxbone.WebRTC.customEventHandler.getUserMediaAccepted();
                 } else {
-                  voxbone.WebRTC.customEventHandler.failed({cause: voxbone.C.causes.USER_DENIED_MEDIA_ACCESS});
+                  voxbone.WebRTC.customEventHandler.failed({cause: 'User Denied Media Access'});
                 }
               });
-              //CALL
-              // Start a call (will result in an INVITE)
-              callback = (typeof callback == "function") ? callback : voxbone.noop;
-              if (pc) {
-                voxbone.Logger.loginfo("Already in a call");
-                callback("Already in a call");
-                return;
-              }
-              //var callee = voxbone.WebRTC.configuration.uri
-              createPC(function (err) {
-                if (err && !pc) {
-                  callback("Error creating PeerConnection");
-                  return;
-                }
-                var consentCB = (typeof that.callbacks["consent"] == "function") ? that.callbacks["consent"] : voxbone.noop;
-                consentCB(true);
-                navigator.mediaDevices.getUserMedia({audio: true, video: allowVideo})
-                .then(function (stream) {
-                  //consentCB(false);
-                  myStream = stream;
-                  voxbone.WebRTC.rtcSession.connection.localStreams.push(myStream);
-                  voxbone.WebRTC.monitorStreamVolume('local');
-                  pc.addStream(stream);
-                  var previewCB = (typeof that.callbacks["preview"] == "function") ? that.callbacks["preview"] : voxbone.noop;
-                  previewCB(stream);
-                  // Create offer
-                  var mediaConstraints = null;
-                  if (adapter.browserDetails.browser == "firefox" || adapter.browserDetails.browser == "edge") {
-                    mediaConstraints = {
-                      'offerToReceiveAudio': true,
-                      'offerToReceiveVideo': allowVideo
-                    };
-                  } else {
-                    mediaConstraints = {
-                      'mandatory': {
-                        'OfferToReceiveAudio': true,
-                        'OfferToReceiveVideo': allowVideo
-                      }
-                    };
-                  }
-                  voxbone.Logger.loginfo(mediaConstraints);
-                  voxbone.WebRTC.rtcSession.isInProgress = true;
-                  pc.createOffer(
-                    function (offer) {
-                      if (sdpSent === true) {
-                        voxbone.Logger.loginfo("Offer already sent, not sending it again");
-                        return;
-                      }
-                      sdpSent = true;
-                      pc.setLocalDescription(offer);
-                      var jsep = {
-                        type: offer.type,
-                        sdp: offer.sdp
-                      };
-                      // Send the open request
-                      var msg = {
-                        request: "invite",
-                        id: randomString(16),
-                        payload: {
-                          callee: callee,
-                          jsep: jsep,
-                          // These two fields are only needed by guests
-                          // in case they want to authenticate their INVITEs
-                          authuser: authuser,
-                          secret: secret
-                        }
-                      };
-                      voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_WAITING_FOR_ACK;
-                      sendMsgWrapper(msg, function response(result) {
-                        voxbone.Logger.loginfo("Got answer to offer:", result);
-                        if (result["response"] === "error") {
-                          callback(result["payload"]["reason"]);
-                          var options = voxbone.WebRTC.getOptions();
-                          options.eventHandlers.failed({cause: result["payload"]["reason"]});
-                          voxbone.WebRTC.hangup();
-                          return;
-                        }
-                        var remoteJsep = result["payload"]["jsep"];
-                        voxbone.Logger.loginfo(remoteJsep);
-                        voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_ANSWERED;
-                        pc.setRemoteDescription(
-                          new RTCSessionDescription(remoteJsep),
-                          function () {
-                            voxbone.Logger.loginfo("Remote description accepted!");
-                            var options = voxbone.WebRTC.getOptions();
-                            options.eventHandlers.accepted();
-                            voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_CONFIRMED;
-                            callback();
-                          }, function (error) {
-                            voxbone.WebRTC.hangup();
-                            var options = voxbone.WebRTC.getOptions();
-                            options.eventHandlers.failed({cause: error});
-                            callback(error);
-                          });
-                      });
-                    }, function (error) {
-                      voxbone.WebRTC.hangup();
-                      var options = voxbone.WebRTC.getOptions();
-                      options.eventHandlers.failed({cause: error});
-                      callback(error);
-                    }, mediaConstraints);
-                })
-                .catch(function (error) {
-                  consentCB(false);
-                  var options = voxbone.WebRTC.getOptions();
-                  options.eventHandlers.failed({cause: error});
-                  callback(error);
-                });
-              });
+              startCall();
             });
           });
         });
@@ -1233,13 +1101,128 @@ function Voxbone(config) {
         that.on('stream', function (stream) {
           voxbone.WebRTC.rtcSession.connection.remoteStreams.push(stream);
           voxbone.WebRTC.monitorStreamVolume('remote');
-          //this out still hears echo local and no remote coming through
           if (voxbone.WebRTC.allowVideo) {
             voxbone.WebRTC.initVideoElement(voxbone.WebRTC.videoComponentName, stream);
           } else {
             voxbone.WebRTC.initAudioElement(voxbone.WebRTC.audioComponentName, stream);
           }
         });
+
+        function startCall() {
+          callback = (typeof callback == "function") ? callback : voxbone.noop;
+          if (pc) {
+            voxbone.Logger.loginfo("Already in a call");
+            callback("Already in a call");
+            return;
+          }
+          createPC(function (err) {
+            if (err && !pc) {
+              callback("Error creating PeerConnection");
+              return;
+            }
+            var consentCB = (typeof that.callbacks["consent"] == "function") ? that.callbacks["consent"] : voxbone.noop;
+            consentCB(true);
+            navigator.mediaDevices.getUserMedia({audio: true, video: allowVideo})
+            .then(function (stream) {
+              //consentCB(false);
+              myStream = stream;
+              voxbone.WebRTC.rtcSession.connection.localStreams.push(myStream);
+              voxbone.WebRTC.monitorStreamVolume('local');
+              pc.addStream(stream);
+              var previewCB = (typeof that.callbacks["preview"] == "function") ? that.callbacks["preview"] : voxbone.noop;
+              previewCB(stream);
+              createOffer(pc);
+            })
+            .catch(function (error) {
+              consentCB(false);
+              var options = voxbone.WebRTC.getOptions();
+              options.eventHandlers.failed({cause: error});
+              callback(error);
+            });
+          });
+        }
+
+        function createOffer(pc) {
+          var mediaConstraints = null;
+          if (adapter.browserDetails.browser == "firefox" || adapter.browserDetails.browser == "edge") {
+            mediaConstraints = {
+              'offerToReceiveAudio': true,
+              'offerToReceiveVideo': allowVideo
+            };
+          } else {
+            mediaConstraints = {
+              'mandatory': {
+                'OfferToReceiveAudio': true,
+                'OfferToReceiveVideo': allowVideo
+              }
+            };
+          }
+          voxbone.Logger.loginfo(mediaConstraints);
+          voxbone.WebRTC.rtcSession.isInProgress = true;
+          pc.createOffer(
+            function (offer) {
+              if (sdpSent === true) {
+                voxbone.Logger.loginfo("Offer already sent, not sending it again");
+                return;
+              }
+              sdpSent = true;
+              pc.setLocalDescription(offer);
+              var jsep = {
+                type: offer.type,
+                sdp: offer.sdp
+              };
+              // Send the open request
+              var msg = {
+                request: "invite",
+                id: randomString(16),
+                payload: {
+                  callee: callee,
+                  jsep: jsep,
+                  // These two fields are only needed by guests
+                  // in case they want to authenticate their INVITEs
+                  authuser: authuser,
+                  secret: secret
+                }
+              };
+              voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_WAITING_FOR_ACK;
+              sendMsgWrapper(msg, function response(result) {
+                processInviteResponse(pc, result);
+              });
+            }, function (error) {
+              voxbone.WebRTC.hangup();
+              var options = voxbone.WebRTC.getOptions();
+              options.eventHandlers.failed({cause: error});
+              callback(error);
+            }, mediaConstraints);
+        }
+
+        function processInviteResponse(pc, result){
+          voxbone.Logger.loginfo("Got answer to offer:", result);
+          if (result["response"] === "error") {
+            callback(result["payload"]["reason"]);
+            var options = voxbone.WebRTC.getOptions();
+            options.eventHandlers.failed({cause: result["payload"]["reason"]});
+            voxbone.WebRTC.hangup();
+            return;
+          }
+          var remoteJsep = result["payload"]["jsep"];
+          voxbone.Logger.loginfo(remoteJsep);
+          voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_ANSWERED;
+          pc.setRemoteDescription(
+            new RTCSessionDescription(remoteJsep),
+            function () {
+              voxbone.Logger.loginfo("Remote description accepted!");
+              var options = voxbone.WebRTC.getOptions();
+              options.eventHandlers.accepted();
+              options.eventHandlers.confirmed();
+              callback();
+            }, function (error) {
+              voxbone.WebRTC.hangup();
+              var options = voxbone.WebRTC.getOptions();
+              options.eventHandlers.failed({cause: error});
+              callback(error);
+            });
+        }
 
       },
 
@@ -1262,9 +1245,11 @@ function Voxbone(config) {
        * Sends DTMF tones using inband for chrome and SIP Info otherwise
        */
       sendDTMF: function (tone) {
-        if (!tone)
-          return;
-        if (adapter.browserDetails.browser === 'chrome') {
+        if(!voxbone.WebRTC.isCallOpen()) {
+          voxbone.Logger.logerror('call has not started');
+        } else if (String(' ABCD0123456789#*').indexOf(tone) === -1) {
+          voxbone.Logger.logerror('Invalid tone');
+        } else if (adapter.browserDetails.browser === 'chrome') {
           // Send the tone inband
           if (!dtmfSender) {
             // Create the DTMF sender, if possible
@@ -1279,7 +1264,7 @@ function Voxbone(config) {
                 };
               }
             }
-            if (!dtmfSender) {
+            if (!dtmfSender || !tone) {
               console.warn("Invalid DTMF configuration");
               return;
             }
@@ -1299,7 +1284,7 @@ function Voxbone(config) {
           };
           sendMsgWrapper(msg, function response(result) {
             if (result["response"] === "error") {
-              voxbone.logger.error(result);
+              voxbone.Logger.logerror(result["payload"]["reason"]);
               return;
             }
           });
@@ -1311,28 +1296,14 @@ function Voxbone(config) {
        */
       hangup: function (cleanupOnly) {
         if (Object.keys(this.rtcSession).length !== 0) {
-          if (voxbone.WebRTC.rtcSession.status !== voxbone.C.STATUS_TERMINATED) {
-            voxbone.Logger.loginfo('hangup!');
+          if (voxbone.WebRTC.rtcSession.status === voxbone.C.STATUS_NULL) {
+            voxbone.Logger.logerror('call has not started');
+          } else if (voxbone.WebRTC.rtcSession.status !== voxbone.C.STATUS_TERMINATED) {
             var previewCB = (typeof that.callbacks["preview"] == "function") ? that.callbacks["preview"] : voxbone.noop;
             previewCB(null);
             if (myStream) {
               voxbone.Logger.loginfo("Stopping local stream");
-              try {
-                // Try a MediaStream.id.stop() first
-                myStream.id.stop();
-              } catch (e) {
-                // Do nothing if this fails
-              }
-              try {
-                var tracks = myStream.getTracks();
-                for (var i in tracks) {
-                  var mst = tracks[i];
-                  if (mst)
-                    mst.stop();
-                }
-              } catch (e) {
-                // Do nothing if this fails
-              }
+              stopLocalStream(myStream);
             }
             // Close PeerConnection
             try {
@@ -1353,8 +1324,25 @@ function Voxbone(config) {
           }
           voxbone.WebRTC.cleanUp();
         }
-        //line below will make sure that the ringing call ends no matter what
-        //voxbone.WebRTC.customEventHandler.failed({cause : 'BYE'});
+
+        function stopLocalStream(myStream) {
+          try {
+            // Try a MediaStream.id.stop() first
+            myStream.id.stop();
+          } catch (e) {
+            // Do nothing if this fails
+          }
+          try {
+            var tracks = myStream.getTracks();
+            for (var i in tracks) {
+              var mst = tracks[i];
+              if (mst)
+                mst.stop();
+            }
+          } catch (e) {
+            // Do nothing if this fails
+          }
+        }
       },
 
       /**
@@ -1515,7 +1503,7 @@ function Voxbone(config) {
     that.callbacks[event] = callback;
   };
 
-  // Dispatcher management
+  // Non-used method for getting ICE candidates from the dispatcher
   function getIceServers() {
     var msg = {
       request: "getIceServers",
@@ -1525,9 +1513,9 @@ function Voxbone(config) {
       if (result["response"] === "error")
         return;
       iceServers = result["payload"].iceServers;
-      voxbone.Logger.loginfo("ICE servers:", iceServers);
+      voxbone.Logger.loginfo("ICE servers: " + String(iceServers));
     });
-  };
+  }
 
   function getWrapper(callback) {
     callback = (typeof callback == "function") ? callback : voxbone.noop;
@@ -1542,7 +1530,7 @@ function Voxbone(config) {
       }
       callback(null, result["payload"]["wrapper"]);
     });
-  };
+  }
 
   // Wrapper
   function createWrapper(address, callback) {
@@ -1672,8 +1660,10 @@ function Voxbone(config) {
       callback("PeerConnection exists");
       return;
     }
-    // Create PeerConnection
-    var pc_config = iceServers;
+    var options = voxbone.WebRTC.getOptions();
+    // Create PeerConnection with epauth ICE servers otherwise use dispatcher
+    var pc_config = options.pcConfig.iceServers || iceServers;
+    console.log(pc_config);
     var pc_constraints = {
       "optional": [{"DtlsSrtpKeyAgreement": true}]
     };
@@ -1806,22 +1796,6 @@ function Voxbone(config) {
     });
   };
 
-  // Media controls (web demo only, no API)
-  // this.toggleMute = function(callback) {
-  // 	callback = (typeof callback == "function") ? callback : voxbone.noop;
-  // 	var stream = myStream["sfuaudio"];		// Assuming profile=separated
-  // 	if(!stream)
-  // 		stream = myStream["mixedaudio"];	// Maybe profile=mixing?
-  // 	if(!stream)
-  // 		stream = myStream["sfuvideo"];		// Or maybe profile=together
-  // 	if(!stream || !stream.getAudioTracks() || stream.getAudioTracks().length === 0) {
-  // 		callback("No audio track");
-  // 		return;
-  // 	}
-  // 	stream.getAudioTracks()[0].enabled = !stream.getAudioTracks()[0].enabled;
-  // 	callback(null, stream.getAudioTracks()[0].enabled);
-  // };
-
   // Private helpers to send messages to the wrapper or to the Frontend
   function sendMsgFrontend(message, callback) {
     callback = (typeof callback == "function") ? callback : voxbone.noop;
@@ -1887,7 +1861,5 @@ function Voxbone(config) {
     if (config.post_logs) voxbone.WebRTC.configuration.post_logs = config.post_logs || voxbone.WebRTC.configuration.post_logs;
   }
 
-  voxbone.Logger.loginfo(voxbone);
   return voxbone;
-
 }
