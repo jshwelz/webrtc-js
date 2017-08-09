@@ -2622,6 +2622,7 @@ function Voxbone(config) {
        */
       configuration: {
         'connectionId': undefined,
+        'display': this.display,
         'username': this.username,
         'authuser': this.authuser,
         'secret': this.secret,
@@ -4050,6 +4051,7 @@ function Voxbone(config) {
   }
 
   if (config) {
+    if (config.displayName) voxbone.WebRTC.configuration.display = config.displayName;
     if (config.sipUsername) voxbone.WebRTC.configuration.username = config.sipUsername;
     if (config.sipAuthUser) voxbone.WebRTC.configuration.authuser = config.sipAuthUser || config.sipUsername;
     if (config.sipPassword) voxbone.WebRTC.configuration.secret = config.sipPassword;

@@ -156,10 +156,11 @@ The first one is declaring a voxbone object with the configuration parameters fo
 
 ```
 var voxbone = new Voxbone({
-  sipUsername: 'sipUsername',
-  sipPassword: 'sipPassword',
-  sipAuthUser: 'sipAuthenticationUsername',
-  sipRegistrar: 'registrar',
+  displayName: 'display name',
+  sipUsername: 'sip username',
+  sipPassword: 'sip password',
+  sipAuthUser: 'sip authentication username',
+  sipRegistrar: 'sip registrar',
   log_level: 2, //0,1 or 2
   post_logs: true
 });
