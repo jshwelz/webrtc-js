@@ -24,7 +24,8 @@ function Voxbone(config) {
      */
     voxbone.C = C;
     var that = this;
-    frontend = io.connect('https://janus.click2vox.io:9011/');
+    var janusURL = config.janusURL || 'https://janus.click2vox.io:9011/';
+    frontend = io.connect(janusURL);
 
     frontend.on('connect', function () {
       voxbone.Logger.loginfo("Connected to Voxbone Janus Server");
@@ -965,7 +966,7 @@ function Voxbone(config) {
       setupInboundCalling: function (details, callback) {
         // Registering an account
         callback = (typeof callback == "function") ? callback : voxbone.noop;
-        voxbone.Logger.loginfo(details);
+        //voxbone.Logger.loginfo(details);
         // We need a wrapper first
         if (wrapper) {
           wrapper.close();
