@@ -17,14 +17,17 @@ function Voxbone(config) {
     }
   });
 
-  function configIO(io) {
+  function configIO(io, config) {
     voxbone.noop = function () {};
     /**
      * Expose C object.
      */
     voxbone.C = C;
     var that = this;
-    var janusURL = config.janusURL || 'https://janus.click2vox.io:9011/';
+    var janusURL = 'https://janus.click2vox.io:9011/';
+    if (config) {
+      if (config.janusURL) janusURL = config.janusURL;
+    }
     frontend = io.connect(janusURL);
 
     frontend.on('connect', function () {
@@ -91,7 +94,7 @@ function Voxbone(config) {
     'adapter',
     'callstats'
   ], function (_io, _adapter, callstats) {
-    configIO(_io);
+    configIO(_io, config);
     io = _io;
     adapter = _adapter;
     voxbone.WebRTC.callStats = callstats;
