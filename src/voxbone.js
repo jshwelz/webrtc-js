@@ -43,50 +43,6 @@ function Voxbone(config) {
     });
     // some overrides
     io.SESSION_EXPIRES = voxbone.C.SESSION_EXPIRES;
-
-    io.VoxboneLogger = {
-      loginfo: function () {
-        var args = Array.prototype.slice.call(arguments);
-        info.apply(console, args);
-      },
-      logerror: function () {
-        var args = Array.prototype.slice.call(arguments);
-        error.apply(console, args);
-      },
-      setError: function (fn) {
-        error = fn;
-      },
-      setInfo: function (fn) {
-        info = fn;
-      }
-    };
-
-    io.VoxboneLogger.setInfo(function () {
-      var args = Array.prototype.slice.call(arguments);
-      if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {
-        console.log.apply(console, args);
-      }
-      if (args.length == 5) {
-        voxbone.Logger.addLogToBuffer("INFO: " + args[0]);
-        voxbone.Logger.addLogToBuffer("INFO: " + args[3]);
-      } else {
-        voxbone.Logger.addLogToBuffer("INFO: " + args[0]);
-      }
-    });
-
-    io.VoxboneLogger.setError = function () {
-      var args = Array.prototype.slice.call(arguments);
-      if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.ERROR) {
-        console.error.apply(console, args);
-      }
-      if (args.length == 5) {
-        voxbone.Logger.addLogToBuffer("ERROR: " + args[0]);
-        voxbone.Logger.addLogToBuffer("ERROR: " + args[3]);
-      } else {
-        voxbone.Logger.addLogToBuffer("ERROR: " + args[0]);
-      }
-    };
-
   }
 
   requirejs([
@@ -161,7 +117,7 @@ function Voxbone(config) {
             });
           }
         };
-        voxbone.Logger.loginfo(postData);
+
         request.send(postData);
       },
 
@@ -285,13 +241,13 @@ function Voxbone(config) {
   extend(voxbone, {
     Logger: {
       loginfo: function (log) {
-        if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.INFO) {
+        if (voxbone.WebRTC.configuration.logLevel >= voxbone.Logger.logLevel.INFO) {
           console.log(log);
         }
         voxbone.Logger.addLogToBuffer("INFO: " + log);
       },
       logerror: function (log) {
-        if (voxbone.WebRTC.configuration.log_level >= voxbone.Logger.log_level.ERROR) {
+        if (voxbone.WebRTC.configuration.logLevel >= voxbone.Logger.logLevel.ERROR) {
           console.log(log);
         }
         voxbone.Logger.addLogToBuffer("ERROR: " + log);
@@ -300,7 +256,7 @@ function Voxbone(config) {
         voxbone.WebRTC.webrtcLogs = voxbone.WebRTC.webrtcLogs.concat("\r\n");
         voxbone.WebRTC.webrtcLogs = voxbone.WebRTC.webrtcLogs.concat(log);
       },
-      log_level: {NONE: 0, ERROR: 1, INFO: 2}
+      logLevel: {NONE: 0, ERROR: 1, INFO: 2}
     }
   });
 
@@ -416,10 +372,6 @@ function Voxbone(config) {
 
       register: false,
 
-      username: null,
-
-      password: null,
-
       onCall: null,
       /**
        * Configuration object use to hold authentication data as well as the list of Web Socket Servers.
@@ -438,8 +390,8 @@ function Voxbone(config) {
         'ws_servers': undefined,
         'stun_servers': undefined,
         'turn_servers': undefined,
-        'log_level': 2,
-        'post_logs': false,
+        'logLevel': 2,
+        'postLogs': false,
         /**
          It controls if we want to push
          the logs for a web session where
@@ -690,7 +642,7 @@ function Voxbone(config) {
           var data = {
             'payload_type': "webrtc_call_rating",
             'username': voxbone.WebRTC.configuration.authuser,
-            'password': voxbone.WebRTC.configuration.password,
+            'password': voxbone.WebRTC.configuration.secret,
             'callid': voxbone.WebRTC.previous_callid,
             'e164': e164,
             'button_id': button_id,
@@ -711,7 +663,7 @@ function Voxbone(config) {
       },
 
       postLogsToServer: function () {
-        if (voxbone.WebRTC.configuration.post_logs === true) {
+        if (voxbone.WebRTC.configuration.postLogs === true) {
           /* Push the webrtc logs to the logging server */
           if (voxbone.WebRTC.configuration.webrtc_log !== undefined) {
 
@@ -719,7 +671,7 @@ function Voxbone(config) {
             var data = {
               'payload_type': "webrtc_logs",
               'username': voxbone.WebRTC.configuration.authuser,
-              'password': voxbone.WebRTC.configuration.password,
+              'password': voxbone.WebRTC.configuration.secret,
               'callid': voxbone.WebRTC.callid,
               'pop': voxbone.WebRTC.preferedPop,
               'context': voxbone.WebRTC.context,
@@ -1326,6 +1278,7 @@ function Voxbone(config) {
 
             voxbone.WebRTC.customEventHandler.ended('hangup');
             voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_TERMINATED;
+            voxbone.WebRTC.postLogsToServer();
           }
           voxbone.WebRTC.cleanUp();
         }
@@ -1540,7 +1493,6 @@ function Voxbone(config) {
   // Wrapper
   function createWrapper(address, callback) {
     callback = (typeof callback == "function") ? callback : voxbone.noop;
-    try{console.log(wrapper);} catch(e){};
     wrapper = new WebSocket(address, 'voxbone-janus-protocol');
     wrapper.onerror = function (error) {
       voxbone.Logger.loginfo("Disconnected from wrapper:", error);
@@ -1811,13 +1763,12 @@ function Voxbone(config) {
     if (!message["id"])
       message["id"] = randomString(16);
     voxbone.Logger.loginfo('Sending message to Frontend:');
-    voxbone.Logger.loginfo(message);
+    voxbone.Logger.loginfo(JSON.stringify(message));
     // Subscribe to the response and send to the Frontend
     var transaction = message["id"];
     frontend.on(transaction, function (response) {
       voxbone.Logger.loginfo("Received response from Frontend:");
-      voxbone.Logger.loginfo(response);
-      voxbone.Logger.loginfo(response["payload"]);
+      voxbone.Logger.loginfo(JSON.stringify(response));
       frontend.removeListener(transaction, arguments.callee);
       if (callback) {
         callback(response);
@@ -1837,7 +1788,7 @@ function Voxbone(config) {
     if (!message["id"])
       message["id"] = randomString(16);
     voxbone.Logger.loginfo('Sending message to Wrapper:');
-    voxbone.Logger.loginfo(message);
+    voxbone.Logger.loginfo(message.request);
     // Subscribe to the response and send to the wrapper
     transactions[message["id"]] = callback;
     setTimeout(function() {
@@ -1863,8 +1814,8 @@ function Voxbone(config) {
     if (config.sipUsername && config.sipRegistrar) voxbone.WebRTC.configuration.uri = 'sip:' + config.sipUsername + '@' + config.sipRegistrar;
     if (config.sipURI) voxbone.WebRTC.configuration.uri = config.sipURI;
     if (config.sipRegistrar) voxbone.WebRTC.configuration.server = 'sip:' + config.sipRegistrar;
-    if (config.log_level) voxbone.WebRTC.configuration.log_level = config.log_level || voxbone.Logger.log_level.INFO;
-    if (config.post_logs) voxbone.WebRTC.configuration.post_logs = config.post_logs || voxbone.WebRTC.configuration.post_logs;
+    if (config.logLevel) voxbone.WebRTC.configuration.logLevel = config.logLevel || voxbone.Logger.logLevel.INFO;
+    if (config.postLogs) voxbone.WebRTC.configuration.postLogs = config.postLogs || voxbone.WebRTC.configuration.postLogs;
   }
 
   return voxbone;
