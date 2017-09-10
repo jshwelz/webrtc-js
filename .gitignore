@@ -28,6 +28,3 @@ coverage
 
 conf/credentials.json
 .env
-
-#Idea IDE
-.idea
