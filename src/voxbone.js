@@ -63,6 +63,7 @@ function Voxbone(config) {
   var pc = null;
   var dtmfSender = null;
   var sdpSent = false;
+  var offerlessInvite = false;
   // default ice
   var iceServers = {"iceServers": [{"url": "stun:stun.l.google.com:19302"}]};
 
@@ -803,10 +804,10 @@ function Voxbone(config) {
             'peerconnection': function (e) {
             },
             'sending': function (e) {
-              voxbone.callid = e.request.call_id;
+              voxbone.WebRTC.callid = e.request.call_id;
               var pc = voxbone.WebRTC.rtcSession.connection.pc;
               var remoteUserId = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
-              voxbone.callStats.addNewFabric(pc, remoteUserId, voxbone.callStats.fabricUsage.audio, voxbone.callid, null);
+              voxbone.callStats.addNewFabric(pc, remoteUserId, voxbone.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
             },
             'progress': function (e) {
               voxbone.WebRTC.customEventHandler.progress(e);
@@ -1539,19 +1540,28 @@ function Voxbone(config) {
               voxbone.Logger.logerror(err);
               return;
             }
-            // Set the remote description
-            pc.setRemoteDescription(
-              new RTCSessionDescription(remoteJsep),
-              function () {
-                voxbone.Logger.loginfo("Remote description accepted!");
-                // Notify user
-                var incomingcallCB = (typeof that.callbacks["incomingcall"] == "function") ? that.callbacks["incomingcall"] : voxbone.noop;
-                incomingcallCB(caller, allowVideo);
-              }, function (error) {
-                // An error occurred, automatically hangup
-                voxbone.WebRTC.hangup();
-                voxbone.Logger.logerror(error);
-              });
+            if(remoteJsep) {
+              // Set the remote description
+              pc.setRemoteDescription(
+                new RTCSessionDescription(remoteJsep),
+                function () {
+                  voxbone.Logger.loginfo("Remote description accepted!");
+                  // Notify user
+                  var incomingcallCB = (typeof that.callbacks["incomingcall"] == "function") ? that.callbacks["incomingcall"] : voxbone.noop;
+                  incomingcallCB(caller, allowVideo);
+                }, function (error) {
+                  // An error occurred, automatically hangup
+                  voxbone.WebRTC.hangup();
+                  voxbone.Logger.logerror(error);
+                });
+            } else {
+              // Offerless INVITE?
+              offerlessInvite = true;
+              voxbone.Logger.info("Incoming call with no Remote description");
+              // Notify user
+              var incomingcallCB = (typeof that.callbacks["incomingcall"] == "function") ? that.callbacks["incomingcall"] : voxbone.noop;
+              incomingcallCB(caller, allowVideo, true);
+            }
           });
         } else if (event === "losses") {
           var info = json["payload"];
@@ -1692,7 +1702,8 @@ function Voxbone(config) {
         };
       }
       voxbone.Logger.loginfo(mediaConstraints);
-      pc.createAnswer(
+      pc.voxboneAction = (offerlessInvite ? pc.createOffer : pc.createAnswer);
+      pc.voxboneAction(
         function (answer) {
           if (sdpSent === true) {
             voxbone.Logger.loginfo("Offer already sent, not sending it again");
@@ -1722,7 +1733,25 @@ function Voxbone(config) {
               return;
             }
             voxbone.WebRTC.rtcSession.status = voxbone.C.STATUS_CONFIRMED;
-            callback();
+            if(offerlessInvite) {
+              // If this was in response to an offerless INVITE, we have
+              // used the "accept" to send our own SDP offer, which means
+              // we'll get the SDP answer in the response to the accept
+              var remoteJsep = result["payload"]["jsep"];
+              console.log(remoteJsep);
+              pc.setRemoteDescription(
+                new RTCSessionDescription(remoteJsep),
+                function() {
+                  console.log("Remote description accepted!");
+                  callback();
+                }, function(error) {
+                  voxbone.WebRTC.hangup();
+                  voxbone.Logger.logerror(error);
+                  callback(error);
+                });
+            } else {
+              callback();
+            }
           });
         }, function (error) {
           voxbone.WebRTC.hangup();
