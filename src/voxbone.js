@@ -505,7 +505,11 @@ function Voxbone(config) {
             voxbone.Logger.loginfo("callStats Status: errCode = " + csError + " Msg = " + csMsg);
           };
           var localUserId = ((data.username).split(":"))[1];
-          voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
+          try {
+            voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
+          } catch (e) {
+            voxbone.Logger.logerror(e);
+          }
         } else {
           this.customEventHandler.failed({cause: data.error});
         }
@@ -521,6 +525,7 @@ function Voxbone(config) {
           });
         }
 
+        this.callid = randomString(16);
         this.customEventHandler.readyToCall();
 
         function getPreferedPop() {
@@ -713,7 +718,10 @@ function Voxbone(config) {
         }
 
         voxbone.WebRTC.cleanAudioElement(voxbone.WebRTC.audioComponentName);
-        voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
+        var c = voxbone.WebRTC.callid;
+        if(typeof c != "undefined" && c.length > 0) {
+          voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
+        }
         voxbone.WebRTC.callid = "";
         voxbone.WebRTC.webrtcLogs = "";
         voxbone.WebRTC.rtcSession.connection.localStreams = [];
@@ -722,6 +730,7 @@ function Voxbone(config) {
         dtmfSender = null;
         pc = null;
         sdpSent = false;
+        offerlessInvite = false;
         voxbone.WebRTC.rtcSession.isInProgress = false;
         voxbone.WebRTC.rtcSession.isEstablished = false;
 
