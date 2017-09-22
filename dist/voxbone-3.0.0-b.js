@@ -2724,7 +2724,7 @@ function Voxbone(config) {
           });
         }
 
-        this.callid = randomString(16);
+        if (!this.callid) this.callid = randomString(16);
         this.customEventHandler.readyToCall();
 
         function getPreferedPop() {
@@ -2921,7 +2921,7 @@ function Voxbone(config) {
         if(typeof c != "undefined" && c.length > 0) {
           voxbone.WebRTC.previous_callid = voxbone.WebRTC.callid;
         }
-        voxbone.WebRTC.callid = "";
+        voxbone.WebRTC.callid = randomString(16);
         voxbone.WebRTC.webrtcLogs = "";
         voxbone.WebRTC.rtcSession.connection.localStreams = [];
         voxbone.WebRTC.rtcSession.connection.remoteStreams = [];
