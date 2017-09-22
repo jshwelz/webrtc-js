@@ -2206,8 +2206,8 @@ function Voxbone(config) {
     paths: {
       io: "//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io",
       adapter: [
-        "//cdn.temasys.com.sg/adapterjs/0.14.3/adapter.min",
-        "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.14.3/adapter.min"
+        "//cdn.temasys.io/adapterjs/0.15.0/adapter.min",
+        "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.15.0/adapter.min"
       ],
       callstats: [
         "//cdn.voxbone.com/lib/callstats-3.21.1.min",
@@ -3186,6 +3186,8 @@ function Voxbone(config) {
               });
 
               that.on('stream', function (stream) {
+                var dest = voxbone.WebRTC.configuration.display || voxbone.WebRTC.configuration.uri;
+                voxbone.WebRTC.callStats.addNewFabric(pc, dest, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
                 voxbone.WebRTC.rtcSession.connection.remoteStreams.push(stream);
                 voxbone.WebRTC.monitorStreamVolume('remote');
                 if (voxbone.WebRTC.allowVideo) {
@@ -3265,6 +3267,7 @@ function Voxbone(config) {
         });
 
         that.on('stream', function (stream) {
+          voxbone.WebRTC.callStats.addNewFabric(pc, destPhone, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
           voxbone.WebRTC.rtcSession.connection.remoteStreams.push(stream);
           voxbone.WebRTC.monitorStreamVolume('remote');
           if (voxbone.WebRTC.allowVideo) {
@@ -3607,7 +3610,7 @@ function Voxbone(config) {
         if (!source || source !== 'remote') {
           streams = voxbone.WebRTC.rtcSession.connection.localStreams;
           this.isMuted = true;
-          //voxbone.WebRTC.callStats.sendFabricEvent(voxbone.WebRTC.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
+          voxbone.WebRTC.callStats.sendFabricEvent(pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
         } else {
           streams = voxbone.WebRTC.rtcSession.connection.remoteStreams;
           this.isRemoteMuted = true;
@@ -3630,7 +3633,7 @@ function Voxbone(config) {
         if (!source || source !== 'remote') {
           streams = voxbone.WebRTC.rtcSession.connection.localStreams;
           this.isMuted = false;
-          //voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
+          voxbone.WebRTC.callStats.sendFabricEvent(pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
         } else {
           streams = voxbone.WebRTC.rtcSession.connection.remoteStreams;
           this.isRemoteMuted = false;
@@ -3773,12 +3776,12 @@ function Voxbone(config) {
           });
         } else if (event === "losses") {
           var info = json["payload"];
-          voxbone.Logger.loginfo('Losses event:', info);
+          voxbone.Logger.loginfo('Losses event: '+JSON.stringify(info));
           var lossesCB = (typeof that.callbacks["losses"] == "function") ? that.callbacks["losses"] : voxbone.noop;
           lossesCB(info);
         } else if (event === "missedcalls") {
           var calls = json["payload"];
-          voxbone.Logger.loginfo('Missed calls event:', calls);
+          voxbone.Logger.loginfo('Missed calls event: '+JSON.stringify(calls));
           var missedCB = (typeof that.callbacks["missedcalls"] == "function") ? that.callbacks["missedcalls"] : voxbone.noop;
           missedCB(calls);
         } else if (event === "webrtc" && json["payload"].status === "up") {
