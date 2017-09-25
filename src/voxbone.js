@@ -371,6 +371,8 @@ function Voxbone(config) {
 
       inboundCalling: false,
 
+      connectedToJanus: false,
+
       register: false,
 
       onCall: null,
@@ -433,7 +435,11 @@ function Voxbone(config) {
         'getUserMediaAccepted': function (e) {
           voxbone.Logger.loginfo("local media accepted");
         },
-        'connected': function (e) {},
+        'connected': function (e) {
+          var event = new CustomEvent("connectedToJanus");
+          voxbone.WebRTC.connectedToJanus = true;
+          document.dispatchEvent(event);
+        },
         'registered': function (e) {}
       },
 
@@ -517,12 +523,23 @@ function Voxbone(config) {
         if (voxbone.WebRTC.onCall instanceof Function && !voxbone.WebRTC.phone) {
           this.inboundCalling = true;
           this.configuration.register = true;
-          this.setupInboundCalling(that.configuration, function (err) {
-            if (err) {
-              voxbone.Logger.logerror('Registration failed:');
-              voxbone.Logger.logerror(err);
-            }
-          });
+          if (this.connectedToJanus) {
+            this.setupInboundCalling(that.configuration, function (err) {
+              if (err) {
+                voxbone.Logger.logerror('Registration failed:');
+                voxbone.Logger.logerror(err);
+              }
+            });
+          } else {
+            document.addEventListener("connectedToJanus", function() {
+              voxbone.WebRTC.setupInboundCalling(that.configuration, function (err) {
+                if (err) {
+                  voxbone.Logger.logerror('Registration failed:');
+                  voxbone.Logger.logerror(err);
+                }
+              });
+            });
+          }
         }
 
         if (!this.callid) this.callid = randomString(16);
