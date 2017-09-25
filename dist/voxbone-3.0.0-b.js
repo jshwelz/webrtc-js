@@ -2730,13 +2730,14 @@ function Voxbone(config) {
               }
             });
           } else {
-            document.addEventListener("connectedToJanus", function() {
+            document.addEventListener("connectedToJanus", function fn(e) {
               voxbone.WebRTC.setupInboundCalling(that.configuration, function (err) {
                 if (err) {
                   voxbone.Logger.logerror('Registration failed:');
                   voxbone.Logger.logerror(err);
                 }
               });
+              e.target.removeEventListener(e.type, fn);
             });
           }
         }
