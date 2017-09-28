@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.0.0 - September 2017
+
+* #123. - Major breaking change update. Replacement of JSSIP with Janus. More info: https://github.com/voxbone-workshop/webrtc-js/wiki/voxbone-3.0
+
 ## 2.2.4 - July 2017
 
 * #117. - Validate DTMF digit is valid
