@@ -1,3 +1,5 @@
+*Build Status* _(to-v3.0-beta branch)_: [![CircleCI](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/to-v3.0-beta.svg?style=svg)](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/to-v3.0-beta)
+
 # Introduction
 webrtc-js is a Voxbone project that allows web users to call a SIP address or Voxbone SIP Trunk from WebRTC-enabled browsers. The library is focused on click-to-call use cases. See below is information on how this library works. More information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
 
@@ -38,9 +40,9 @@ Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit
 # File references
 Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
 
-* use [//cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js) to access a specific patch release
-* use [//cdn.voxbone.com/voxbone/voxbone-2.2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.min.js) to access a minor version release with the latest patches
-* use [//cdn.voxbone.com/voxbone/voxbone-2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.min.js) to access a major version release with the latest updates
+* use [//cdn.voxbone.com/voxbone/voxbone-3.0.0-b.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.0.0-b.min.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-3.0.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.0.min.js) to access a minor version release with the latest patches
+* use [//cdn.voxbone.com/voxbone/voxbone-3.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.min.js) to access a major version release with the latest updates
 
 Source maps are included with the minified files for simplified debugging. Remove the _min_ from the file names above for the unminified versions.
 
@@ -62,9 +64,9 @@ var voxrtc_config = {"key":"ABwxcFX6ayVxu/uNuZu3eBsjrFeg=","expires":1426067127,
 //Initialize Voxbone WebRTC connection
 voxbone.WebRTC.init(voxrtc_config);
 
-//Place a call on a given number
+//Place a call on a given number and enable video adding a 2nd parameter "true"
 var e164 = 'a_number';
-voxbone.WebRTC.call(e164);
+voxbone.WebRTC.call(e164, video);
 ```
 
 
@@ -144,19 +146,26 @@ voxbone.WebRTC.call(e164);
 
 display name of the caller can be customized using
 ```javascript
-voxbone.WebRTC.configuration.display_name = "a custom display name";
+voxbone.WebRTC.configuration.display = "a custom display name";
 ```
 Note that the above has to be performed before call is established.
 
 #### Receiving a Call ####
 
-Because this is an alpha feature, there are a few options you'll need to set in order to use the feature.
+Because this is a beta feature, there are a few options you'll need to set in order to use the feature.
 
-The first two are your username and password so that we can do a `REGISTER` request to the end SIP gateway.
+The first one is declaring a voxbone object with the configuration parameters for doing the `REGISTER` request to the end SIP gateway.
 
 ```
-voxbone.WebRTC.username = 'a-username-string';
-voxbone.WebRTC.password = 'a-super-secret-password';
+var voxbone = new Voxbone({
+  displayName: 'display name',
+  sipUsername: 'sip username',
+  sipPassword: 'sip password',
+  sipAuthUser: 'sip authentication username',
+  sipRegistrar: 'sip registrar',
+  log_level: 2, //0,1 or 2
+  post_logs: true
+});
 ```
 
 You also need to pass in a function that decides whether or not to accept the call or not. This function takes a data argument which contains information about the call and a callback. The Callback takes a true or false parameter to accept or decline the inbound call. In the example below we immediately call the callback with the true argument but because its a callback function, you can do this asynchronously after doing any kind of logic you want - a HTTP call, waiting for something to happen within the page such as a click on an accept button.
@@ -171,7 +180,7 @@ voxbone.WebRTC.onCall = function (data, cb) {
 
 ### Methods available during a call
 
-video and audio html element will automatically gets added to the html document upon call establishment.
+video and audio html element will be automatically added to the html document upon call establishment.
 If you want to avoid defaults elements to be added the page and feed your own element, you can set the ids of these element.
 voxbone.WebRTC will then simply attach the streams to the provided element instead of providing its own.
 
@@ -221,7 +230,7 @@ voxbone.WebRTC.configuration.digit_duration = 1000;
 ####isCallOpen####
 Web application developer can invoke this API to check the call status of the webrtc user. It returns true if user is in middle of a call or if call attempt is already in progress. Web application developer can use this API to enable/disable the ‘call’ button on their web page.
 ```javascript
-voxbone.WebRTC.isCallOpen();
+voxbone.WebRTC.isCallOpen;
 ```
 
 ##Event Handling##

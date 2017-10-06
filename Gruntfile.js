@@ -3,15 +3,15 @@ module.exports = function(grunt) {
 
   grunt.initConfig({
     pkg: grunt.file.readJSON('package.json'),
-    aws: grunt.file.readJSON('conf/credentials.json').aws,
+    aws: grunt.file.exists('conf/credentials.json') ? grunt.file.readJSON('conf/credentials.json').aws : grunt.file.readJSON('conf/credentials.json-dist').aws,
 
     concat: {
       options: {
         banner: '/*!\n' +
-          ' * @license Voxbone v<%= pkg.version %>\n' +
-          ' * Copyright <%= grunt.template.today("yyyy") %> Voxbone. All Rights Reserved.\n' +
-          ' * Licensed under the Apache License, Version 2.0 (the "License") \n' +
-          ' */'
+        ' * @license Voxbone v<%= pkg.version %>\n' +
+        ' * Copyright <%= grunt.template.today("yyyy") %> Voxbone. All Rights Reserved.\n' +
+        ' * Licensed under the Apache License, Version 2.0 (the "License") \n' +
+        ' */'
       },
 
       voxbone: {
@@ -64,12 +64,24 @@ module.exports = function(grunt) {
     },
     jshint: {
       files: [
-          '*.js',
-          'src/*.js'
-        ],
+        '*.js',
+        'src/*.js'
+      ],
       options: {
         globals: {},
         esversion: 6
+      }
+    },
+    karma: {
+      unit: {
+        configFile: 'karma.conf.js',
+        options: {
+          files: [
+            'dist/voxbone-<%= process.env.version || pkg.version %>.js',
+            'tests/spec/*/*Spec.js',
+            'tests/spec/helpers/**/*Helper.js'
+          ]
+        }
       }
     }
   });
@@ -78,6 +90,11 @@ module.exports = function(grunt) {
   grunt.loadNpmTasks('grunt-contrib-concat');
   grunt.loadNpmTasks('grunt-contrib-uglify');
   grunt.loadNpmTasks('grunt-contrib-jshint');
+  grunt.loadNpmTasks('grunt-contrib-jasmine');
+  grunt.loadNpmTasks('grunt-contrib-connect');
+  grunt.loadNpmTasks('grunt-karma');
+
+  grunt.registerTask('test', ["karma"]);
 
   grunt.registerTask('clear-version', 'Reset version variable in process.env', function() {
     delete process.env.version;
