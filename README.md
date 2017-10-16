@@ -40,7 +40,7 @@ Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit
 # File references
 Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
 
-* use [//cdn.voxbone.com/voxbone/voxbone-3.0.0-b.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.0.0-b.min.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-3.0.1.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.0.1.min.js) to access a specific patch release
 * use [//cdn.voxbone.com/voxbone/voxbone-3.0.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.0.min.js) to access a minor version release with the latest patches
 * use [//cdn.voxbone.com/voxbone/voxbone-3.min.js](https://cdn.voxbone.com/voxbone/voxbone-3.min.js) to access a major version release with the latest updates
 
@@ -68,7 +68,6 @@ voxbone.WebRTC.init(voxrtc_config);
 var e164 = 'a_number';
 voxbone.WebRTC.call(e164, video);
 ```
-
 
 ## Authentication token
 You can decide whether to authenticate via basic auth or use token generators:
@@ -300,7 +299,7 @@ Config flag voxbone.WebRTC.configuration.log_level can be set at various levels 
 - `voxbone.Logger.log_level.ERROR` -- Only errors are sent to console
 - `voxbone.Logger.log_level.NONE`  -- No logs are sent to console
 
-### Post logs to Voxbone Server with post_logs##
+### Post logs to Voxbone Server with post_logs
 This configuration option if enabled allows voxbone webrtc sdk to push all the call logs to a voxbone defined backend, where they can be used for troubleshooting. By default, this option is disabled.
 ```javascript
 /**
