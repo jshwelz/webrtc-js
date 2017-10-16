@@ -1,4 +1,4 @@
-*Build Status* _(to-v3.0-beta branch)_: [![CircleCI](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/to-v3.0-beta.svg?style=svg)](https://circleci.com/gh/voxbone-workshop/webrtc-js/tree/to-v3.0-beta)
+*Build Status* _(master branch)_: [![CircleCI](https://circleci.com/gh/voxbone-workshop/webrtc-js.svg?style=svg)](https://circleci.com/gh/voxbone-workshop/webrtc-js)
 
 # Introduction
 webrtc-js is a Voxbone project that allows web users to call a SIP address or Voxbone SIP Trunk from WebRTC-enabled browsers. The library is focused on click-to-call use cases. See below is information on how this library works. More information can be found on our [Developer Portal](https://developers.voxbone.com/docs/webrtc/overview/)
@@ -137,7 +137,7 @@ Please note that no other headers are forwarded by Voxbone.
 
 At the moment you can only do one or the other, make a call or receive a call, you can not do both
 
-####Call establishment####
+#### Call establishment
 Once you're fully set up, you can now establish a call to a given number using
 ```javascript
 var e164 = 'a_number';
@@ -191,7 +191,7 @@ voxbone.WebRTC.videoComponentName = "peer-video";
 
 Note: WebRTC to SIP-controller video calling is experimental.
 
-####Muting####
+#### Muting
 
 Audio stream can be muted/unmuted as shown below
 ```javascript
@@ -203,7 +203,7 @@ voxbone.WebRTC.unmute();
 voxbone.WebRTC.isMuted
 ```
 
-####Sending DTMF####
+#### Sending DTMF
 
 DTMF can be sent once the call is established using
 ```javascript
@@ -227,50 +227,50 @@ Digit duration can also be configured. Digti duration defines the duration of di
 voxbone.WebRTC.configuration.digit_duration = 1000;
 ```
 
-####isCallOpen####
+#### isCallOpen
 Web application developer can invoke this API to check the call status of the webrtc user. It returns true if user is in middle of a call or if call attempt is already in progress. Web application developer can use this API to enable/disable the ‘call’ button on their web page.
 ```javascript
 voxbone.WebRTC.isCallOpen;
 ```
 
-##Event Handling##
+## Event Handling
 Voxbone.js provides many callback APIs allowing the web application to monitor the state of a call. Following is the list:
-####Progress####
+#### Progress
 This callback API indicates the called party phone is ringing now. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.progress = function(e) {
     console.error(“call in progress”);
 }
 ```
-####Failed####
+#### Failed
 This callback API indicates that webRTC sdk failed to establish the call. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.failed = function(e) {
   console.error(“Failed to establish the call”);
 }
 ```
-####getUserMediaFailed####
+#### getUserMediaFailed
 This API is used to indicate that getUserMedia failed which can be a result of browser not being able to access the mic. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.getUserMediaFailed = function(e) {
   console.error(“Failed to access mic”);
 }
 ```
-####Accepted####
+#### Accepted
 This API is used to indicate that call is successfully established. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.accepted = function(e) {
   console.log(“call started”);
 }
 ```
-####Ended####
+#### Ended
 This API is used to indicate that outgoing call just ended. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.ended = function(e) {
   console.log(“call ended”);
 }
 ```
-####localMediaVolume####
+#### localMediaVolume
 This is a callback API to indicate the loudness of the speech at the calling party. Here is a sample implementation of this API:
 ```javascript
 voxbone.WebRTC.customEventHandler.localMediaVolume = function(e) {
@@ -279,7 +279,7 @@ voxbone.WebRTC.customEventHandler.localMediaVolume = function(e) {
 ```
 The localVolume will be in the range of 0 to 1, anything above 0.25 should be considered loud enough.
 
-##Terminating Ongoing Calls with unloadHandler()##
+## Terminating Ongoing Calls with unloadHandler()
 This API should be tied to the page unload event in the web application. It will take care of terminating any ongoing call and does some extra work like pushing the webrtc logs. Here is a sample implementation for this API:
 ```
 <body onbeforeunload="voxbone.WebRTC.unloadHandler();">
