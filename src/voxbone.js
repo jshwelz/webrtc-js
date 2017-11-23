@@ -10,10 +10,7 @@ function Voxbone(config) {
         "//cdn.temasys.io/adapterjs/0.15.0/adapter.min",
         "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.15.0/adapter.min"
       ],
-      callstats: [
-        "//cdn.voxbone.com/lib/callstats-3.21.1.min",
-        "//api.callstats.io/static/callstats-3.21.1.min"
-      ]
+      callstats: "//api.callstats.io/static/callstats.min"
     }
   });
 

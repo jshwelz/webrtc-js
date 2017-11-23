@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.0.2 - November 2017
+
+* #139. - Updates callstats to use latest
+
 ## 3.0.1 - October 2017
 
 * #133. - Proper calling the consent gUM callback.
