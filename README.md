@@ -72,7 +72,7 @@ voxbone.WebRTC.call(e164, video);
 ## Authentication token
 You can decide whether to authenticate via basic auth or use token generators:
 * Basic Auth - allows any anyone to call a given e164 up to your configured trunk limit within Voxbone's border controls. Recommended in most cases where you are ok with anyone dialing a DID, such as those already listed publicly on.
-* Advanved Auth - you must host an auth server and provide a temporary auth token for greater access control. For more advanced users where you do not want to allow anyone to call the specific DID from WebRTC.
+* Advanced Auth - you must host an auth server and provide a temporary auth token for greater access control. For more advanced users where you do not want to allow anyone to call the specific DID from WebRTC.
 
 #### Using Basic Auth
 Provide your username and webrtc key in the basicAuthInit() function.

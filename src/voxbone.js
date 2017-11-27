@@ -5,12 +5,14 @@ function Voxbone(config) {
 
   requirejs.config({
     paths: {
-      io: "//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io",
+      io: [
+        "//cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.4/socket.io",
+        "//cdn.jsdelivr.net/npm/socket.io-client@2.0.4/dist/socket.io"
+      ],
       adapter: [
         "//cdn.temasys.io/adapterjs/0.15.0/adapter.min",
         "//cdnjs.cloudflare.com/ajax/libs/adapterjs/0.15.0/adapter.min"
-      ],
-      callstats: "//api.callstats.io/static/callstats.min"
+      ]
     }
   });
 
@@ -44,13 +46,11 @@ function Voxbone(config) {
 
   requirejs([
     'io',
-    'adapter',
-    'callstats'
-  ], function (_io, _adapter, callstats) {
+    'adapter'
+  ], function (_io, _adapter) {
     configIO(_io, config);
     io = _io;
     adapter = _adapter;
-    voxbone.WebRTC.callStats = callstats;
   });
 
   var that = this;
@@ -262,7 +262,6 @@ function Voxbone(config) {
 
     WebRTC: {
 
-      callStats: undefined,
       /**
        * id of the <audio/> html tag.
        * If an audio element with this id already exists in the page, the script will load it and attach audio stream to it.
@@ -503,16 +502,7 @@ function Voxbone(config) {
           if (voxbone.WebRTC.onCall instanceof Function !== true)
             getPreferedPop();
           authTimeout(that);
-          var callstats_credentials = data.callStatsCredentials;
-          var csInitCallback = function (csError, csMsg) {
-            voxbone.Logger.loginfo("callStats Status: errCode = " + csError + " Msg = " + csMsg);
-          };
           var localUserId = ((data.username).split(":"))[1];
-          try {
-            voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
-          } catch (e) {
-            voxbone.Logger.logerror(e);
-          }
         } else {
           this.customEventHandler.failed({cause: data.error});
         }
@@ -831,7 +821,6 @@ function Voxbone(config) {
               voxbone.WebRTC.callid = e.request.call_id;
               var pc = voxbone.WebRTC.rtcSession.connection.pc;
               var remoteUserId = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
-              voxbone.callStats.addNewFabric(pc, remoteUserId, voxbone.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
             },
             'progress': function (e) {
               voxbone.WebRTC.customEventHandler.progress(e);
@@ -839,7 +828,6 @@ function Voxbone(config) {
             'failed': function (e) {
               var pcObject;
               var conferenceID = voxbone.WebRTC.callid;
-              var callStats = voxbone.WebRTC.callStats;
               voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
 
               if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined' && voxbone.WebRTC.rtcSession.connection)
@@ -847,17 +835,11 @@ function Voxbone(config) {
 
               switch (e.cause) {
                 case 'User Denied Media Access':
-                  if (typeof pcObject === 'object')
-                    callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.getUserMedia);
                   voxbone.WebRTC.customEventHandler.getUserMediaFailed(e);
                   break;
 
                 case 'INCOMPATIBLE_SDP':
                 case 'MISSING_SDP':
-                  if (typeof pcObject === 'object')
-                    callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
-                  break;
-
                 case 'bye':
                 case 'CANCELED':
                 case 'NO_ANSWER':
@@ -868,14 +850,10 @@ function Voxbone(config) {
                 case 'REDIRECTED':
                 case 'UNAVAILABLE':
                 case 'Error calling: 404 Not Found':
-                  if (typeof pcObject === 'object')
-                    callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
                   e.cause = 'Not Found';
                   break;
 
                 default:
-                  if (typeof pcObject === 'object')
-                    callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
                   break;
               }
               voxbone.WebRTC.postLogsToServer();
@@ -1003,7 +981,6 @@ function Voxbone(config) {
 
               that.on('stream', function (stream) {
                 var dest = voxbone.WebRTC.configuration.display || voxbone.WebRTC.configuration.uri;
-                voxbone.WebRTC.callStats.addNewFabric(pc, dest, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
                 voxbone.WebRTC.rtcSession.connection.remoteStreams.push(stream);
                 voxbone.WebRTC.monitorStreamVolume('remote');
                 if (voxbone.WebRTC.allowVideo) {
@@ -1083,7 +1060,6 @@ function Voxbone(config) {
         });
 
         that.on('stream', function (stream) {
-          voxbone.WebRTC.callStats.addNewFabric(pc, destPhone, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
           voxbone.WebRTC.rtcSession.connection.remoteStreams.push(stream);
           voxbone.WebRTC.monitorStreamVolume('remote');
           if (voxbone.WebRTC.allowVideo) {
@@ -1425,7 +1401,6 @@ function Voxbone(config) {
         if (!source || source !== 'remote') {
           streams = voxbone.WebRTC.rtcSession.connection.localStreams;
           this.isMuted = true;
-          voxbone.WebRTC.callStats.sendFabricEvent(pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
         } else {
           streams = voxbone.WebRTC.rtcSession.connection.remoteStreams;
           this.isRemoteMuted = true;
@@ -1448,7 +1423,6 @@ function Voxbone(config) {
         if (!source || source !== 'remote') {
           streams = voxbone.WebRTC.rtcSession.connection.localStreams;
           this.isMuted = false;
-          voxbone.WebRTC.callStats.sendFabricEvent(pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
         } else {
           streams = voxbone.WebRTC.rtcSession.connection.remoteStreams;
           this.isRemoteMuted = false;

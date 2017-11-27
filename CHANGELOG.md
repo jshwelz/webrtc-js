@@ -1,5 +1,9 @@
 # Change Log
 
+## 3.1.0 - November 2017
+
+* #136. - Remove callstats.io
+
 ## 3.0.2 - November 2017
 
 * #139. - Updates callstats to use latest
