@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.2.5 - November 2017
+
+* #136. Remove Callstats.io
+
 ## 2.2.4 - July 2017
 
 * #111. Fixing Callstats library to v3.20.2

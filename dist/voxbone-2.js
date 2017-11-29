@@ -1,5 +1,5 @@
 /*!
- * @license Voxbone v2.2.4
+ * @license Voxbone v2.2.5
  * Copyright 2017 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//** vim: et:ts=4:sw=4:sts=4
@@ -2366,10 +2366,6 @@ var JsSIP, voxbone = voxbone || {};
 
 requirejs.config({
   paths: {
-    callstats: [
-      "//cdn.voxbone.com/lib/callstats-3.20.2.min",
-      "//api.callstats.io/static/callstats-3.20.2.min"
-    ],
     jssip: [
       "//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min",
       "//cdn.bootcss.com/jssip/2.0.6/jssip.min"
@@ -2379,12 +2375,9 @@ requirejs.config({
 
 requirejs([
   'jssip',
-  'callstats'
-], function(_JsSIP, callstats) {
+], function(_JsSIP) {
   configJsSIP(_JsSIP);
   JsSIP = _JsSIP;
-
-  voxbone.WebRTC.callStats = callstats;
 });
 
 // extend.js
@@ -2579,7 +2572,6 @@ extend(voxbone, {
 extend(voxbone, {
 
   WebRTC: {
-    callStats: undefined,
     /**
      * id of the <audio/> html tag.
      * If an audio element with this id already exists in the page, the script will load it and attach audio stream to it.
@@ -2815,14 +2807,6 @@ extend(voxbone, {
         // refresh at 75% of duration
         setTimeout(this.customEventHandler.authExpired, timeout * 750);
       }
-
-      var callstats_credentials = data.callStatsCredentials;
-
-      var csInitCallback = function(csError, csMsg) {
-        voxbone.Logger.loginfo("callStats Status: errCode = " + csError + " Msg = " + csMsg);
-      };
-      var localUserId = ((data.username).split(":"))[1];
-      voxbone.WebRTC.callStats.initialize(callstats_credentials.appId, callstats_credentials.appSecret, localUserId, csInitCallback, null, null);
 
       // This is an inbound call
       if (this.onCall instanceof Function && !this.phone) {
@@ -3096,7 +3080,6 @@ extend(voxbone, {
             voxbone.WebRTC.callid = e.request.call_id;
             var pc = voxbone.WebRTC.rtcSession.connection.pc;
             var remoteUserId = voxbone.WebRTC.rtcSession.remote_identity.uri.user;
-            voxbone.WebRTC.callStats.addNewFabric(pc, remoteUserId, voxbone.WebRTC.callStats.fabricUsage.audio, voxbone.WebRTC.callid, null);
           },
           'progress': function(e) {
             voxbone.WebRTC.customEventHandler.progress(e);
@@ -3104,7 +3087,6 @@ extend(voxbone, {
           'failed': function(e) {
             var pcObject;
             var conferenceID = voxbone.WebRTC.callid;
-            var callStats = voxbone.WebRTC.callStats;
             voxbone.Logger.logerror("Call (" + conferenceID + ") failed. Cause: " + e.cause);
 
             if (typeof voxbone.WebRTC.rtcSession.connection !== 'undefined' && voxbone.WebRTC.rtcSession.connection)
@@ -3112,17 +3094,11 @@ extend(voxbone, {
 
             switch (e.cause) {
               case JsSIP.C.causes.USER_DENIED_MEDIA_ACCESS:
-                if (typeof pcObject === 'object')
-                  callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.getUserMedia);
                 voxbone.WebRTC.customEventHandler.getUserMediaFailed(e);
                 break;
 
               case JsSIP.C.causes.INCOMPATIBLE_SDP:
               case JsSIP.C.causes.MISSING_SDP:
-                if (typeof pcObject === 'object')
-                  callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.createOffer);
-                break;
-
               case JsSIP.C.causes.BYE:
               case JsSIP.C.causes.CANCELED:
               case JsSIP.C.causes.NO_ANSWER:
@@ -3133,8 +3109,7 @@ extend(voxbone, {
               case JsSIP.C.causes.REDIRECTED:
               case JsSIP.C.causes.UNAVAILABLE:
               case JsSIP.C.causes.NOT_FOUND:
-                if (typeof pcObject === 'object')
-                  callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.applicationError);
+              default:
                 break;
 
               // case JsSIP.C.causes.DIALOG_ERROR:
@@ -3146,10 +3121,6 @@ extend(voxbone, {
               // case JsSIP.C.causes.INTERNAL_ERROR:
               // case JsSIP.C.causes.ADDRESS_INCOMPLETE:
               // case JsSIP.C.causes.AUTHENTICATION_ERROR:
-              default:
-                if (typeof pcObject === 'object')
-                  callStats.reportError(pcObject, conferenceID, callStats.webRTCFunctions.signalingError);
-                break;
             }
 
             voxbone.WebRTC.postLogsToServer();
@@ -3385,7 +3356,6 @@ extend(voxbone, {
       if (!source || source !== 'remote') {
         streams = this.rtcSession.connection.getLocalStreams();
         this.isMuted = true;
-        voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioMute, voxbone.WebRTC.callid);
       } else {
         streams = this.rtcSession.connection.getRemoteStreams();
         this.isRemoteMuted = true;
@@ -3408,7 +3378,6 @@ extend(voxbone, {
       if (!source || source !== 'remote') {
         streams = this.rtcSession.connection.getLocalStreams();
         this.isMuted = false;
-        voxbone.WebRTC.callStats.sendFabricEvent(this.rtcSession.connection.pc, voxbone.WebRTC.callStats.fabricEvent.audioUnmute, voxbone.WebRTC.callid);
       } else {
         streams = this.rtcSession.connection.getRemoteStreams();
         this.isRemoteMuted = false;
