@@ -587,7 +587,7 @@ function Voxbone(config) {
           document.body.appendChild(audio);
         }
         //Bind audio stream to audio element
-        audio.src = (window.URL ? URL : webkitURL).createObjectURL(audioStream);
+        audio.srcObject = audioStream;
         return audio;
       },
 
