@@ -1,5 +1,11 @@
 # Change Log
 
+## 2.2.6 - September 2018
+
+* Updates building libraries.
+* Updates RequireJS from v2.3.2 to v2.3.6
+* Fixes and removes warnings about deprecation binding of audio/video streams (by @epelliccioni11)
+
 ## 2.2.5 - November 2017
 
 * #136. Remove Callstats.io
