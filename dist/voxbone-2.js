@@ -1,5 +1,5 @@
 /*!
- * @license Voxbone v2.2.6
+ * @license Voxbone v2.2.7
  * Copyright 2018 Voxbone. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License") 
  *//** vim: et:ts=4:sw=4:sts=4
@@ -2811,8 +2811,8 @@ extend(voxbone, {
         if (typeof this.preferedPop === 'undefined') {
           voxbone.Logger.loginfo('prefered pop undefined, pinging....');
           this.pingServers = data.pingServers;
-          for (var i = 0; i < this.pingServers.length; i++) {
-            voxbone.Pinger.ping(i, this.pingServers[i]);
+          for (var name in this.pingServers) {
+            voxbone.Pinger.ping(name, this.pingServers[name]);
           }
         } else {
           voxbone.Logger.loginfo('preferred pop already set to ' + this.preferedPop);

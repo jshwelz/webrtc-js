@@ -453,7 +453,7 @@ extend(voxbone, {
         if (typeof this.preferedPop === 'undefined') {
           voxbone.Logger.loginfo('prefered pop undefined, pinging....');
           this.pingServers = data.pingServers;
-          for (let name in this.pingServers) {
+          for (var name in this.pingServers) {
             voxbone.Pinger.ping(name, this.pingServers[name]);
           }
         } else {
