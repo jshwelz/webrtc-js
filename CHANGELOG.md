@@ -1,5 +1,9 @@
 # Change Log
 
+## 2.2.7 - September 2018
+
+* Fixes ping servers
+
 ## 2.2.6 - September 2018
 
 * Updates building libraries.
