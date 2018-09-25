@@ -3,8 +3,7 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     jssip: [
-      '//cdnjs.cloudflare.com/ajax/libs/jssip/2.0.6/jssip.min',
-      '//cdn.bootcss.com/jssip/2.0.6/jssip.min'
+      '//cdn.voxbone.com/lib/jssip/jssip-3.2.12.min'
     ]
   }
 });
@@ -428,6 +427,9 @@ extend(voxbone, {
         this.configuration.ws_servers = ['wss://workshop-gateway.voxbone.com'];
       }
 
+      var socket = new JsSIP.WebSocketInterface(this.configuration.ws_servers[0]);
+      this.configuration.sockets = [socket];
+
       this.configuration.stun_servers = data.stunServers;
       this.configuration.turn_servers = data.turnServers;
       this.configuration.webrtc_log = data.log;
@@ -453,8 +455,8 @@ extend(voxbone, {
         if (typeof this.preferedPop === 'undefined') {
           voxbone.Logger.loginfo('prefered pop undefined, pinging....');
           this.pingServers = data.pingServers;
-          for (var i = 0; i < this.pingServers.length; i++) {
-            voxbone.Pinger.ping(i, this.pingServers[i]);
+          for (var name in this.pingServers) {
+            voxbone.Pinger.ping(name, this.pingServers[name]);
           }
         } else {
           voxbone.Logger.loginfo('preferred pop already set to ' + this.preferedPop);
@@ -671,7 +673,7 @@ extend(voxbone, {
         if (streams[i].getAudioTracks().length > 0) {
           /* activate the local volume monitoring */
           try {
-            if (voxbone.WebRTC.audioContext === undefined) { voxbone.WebRTC.audioContext = new AudioContext(); }
+            if (voxbone.WebRTC.audioContext === undefined) { voxbone.WebRTC.audioContext = new (window.AudioContext || window.webkitAudioContext)(); }
           } catch (e) {
             voxbone.Logger.logerror('Web Audio API not supported ' + e);
           }
@@ -788,7 +790,9 @@ extend(voxbone, {
           }
         },
         'extraHeaders': [],
-        'pcConfig': { rtcpMuxPolicy: 'negotiate' },
+        'pcConfig': {
+          //rtcpMuxPolicy: 'negotiate'
+        },
         'mediaConstraints': { 'audio': true, 'video': voxbone.WebRTC.allowVideo }
       };
 
@@ -907,6 +911,10 @@ extend(voxbone, {
         this.phone.on('newRTCSession', function (data) {
           data.session.on('connecting', function (e) {
             voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
+          });
+
+          data.session.connection.addEventListener('addstream', function(event) {
+            options.eventHandlers.addstream(event);
           });
 
           data.session.on('reinvite', function (info) {
@@ -1036,22 +1044,15 @@ extend(voxbone, {
      * @returns {boolean}
      */
     isWebRTCSupported: function () {
-      if (!window.navigator.webkitGetUserMedia && !window.navigator.mozGetUserMedia) {
-        return false;
-      } else {
-        var is_firefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
-        if (is_firefox) {
-          var patt = new RegExp('firefox/([0-9])+');
-          var patt2 = new RegExp('([0-9])+');
-          var user_agent = patt.exec(navigator.userAgent.toLowerCase())[0];
-          var version = patt2.exec(user_agent)[0];
-          if (version < 23) {
-            return false;
-          }
-        }
+      if (window.navigator.userAgent.indexOf('Edge') > -1) return false;
 
-        return true;
-      }
+      var isWebRTCSupported = navigator.getUserMedia ||
+        navigator.webkitGetUserMedia ||
+        navigator.mozGetUserMedia ||
+        navigator.msGetUserMedia ||
+        window.RTCPeerConnection;
+
+      return !!isWebRTCSupported;
     }
   }
 });
