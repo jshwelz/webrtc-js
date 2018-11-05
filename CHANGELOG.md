@@ -1,5 +1,14 @@
 # Change Log
 
+## 4.0.0 - November 2018
+
+* Replaces JSSIP 2.x for 3.x
+* Adds Safari support
+
+## 2.2.7 - September 2018
+
+* Fixes ping servers
+
 ## 2.2.6 - September 2018
 
 * Updates building libraries.

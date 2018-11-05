@@ -2361,7 +2361,8 @@ var JsSIP, voxbone = voxbone || {};
 requirejs.config({
   paths: {
     jssip: [
-      '//cdn.voxbone.com/lib/jssip/jssip-3.2.12.min'
+      '//cdn.voxbone.com/lib/jssip/jssip-3.2.15.min',
+      '//cdn.jsdelivr.net/npm/jssip@3.2.15/lib-es5/JsSIP.min'
     ]
   }
 });
@@ -3149,7 +3150,7 @@ extend(voxbone, {
         },
         'extraHeaders': [],
         'pcConfig': {
-          //rtcpMuxPolicy: 'negotiate'
+          // rtcpMuxPolicy: 'negotiate'
         },
         'mediaConstraints': { 'audio': true, 'video': voxbone.WebRTC.allowVideo }
       };
@@ -3271,7 +3272,7 @@ extend(voxbone, {
             voxbone.WebRTC.customEventHandler.getUserMediaAccepted(e);
           });
 
-          data.session.connection.addEventListener('addstream', function(event) {
+          data.session.connection.addEventListener('addstream', function (event) {
             options.eventHandlers.addstream(event);
           });
 
