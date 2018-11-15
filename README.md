@@ -15,9 +15,9 @@ See our [changelog](https://github.com/voxbone-workshop/webrtc-js/blob/master/CH
 
 Voxbone provides the following reference implementations built on top of webrtc-js:
 
-* [Click2Call Demo](https://developers.voxbone.com/webrtc-editor/) - view and edit the demo code
-* [click2vox.com](https://click2vox.com) - create a free click-to-call button with widget code for any SIP URI
-* Voxbone Customer Portal [widget generator](https://developers.voxbone.com/how-to/setup-webrtc/) - create a click-to-call button & pop-up dialer for any Voxbone DID
+* Voxbone Customer Portal [widget generator](https://developers.voxbone.com/category/webrtc/overview-webrtc/) - create a click-to-call button & pop-up dialer for any Voxbone DID
+* [VoxboneJS Demo](https://github.com/voxbone-workshop/webrtc-tutorial/) - view and edit the demo code
+* ~[click2vox.com](https://click2vox.com) - create a free click-to-call button with widget code for any SIP URI (being retired)~
 
 ### Security controls
 
