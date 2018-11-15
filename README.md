@@ -29,18 +29,18 @@ Calls to webrtc-js are governed by Voxbone's WebRTC to SIP Gateway Service. Thes
 * Voxbone's existing egress SBC and security mechanisms used to protect all traffic
 * Authentication timeout period set to 15 minutes
 
-Please [contact us](mailto:workshop@voxbone.com) for details.
+Please [contact us](mailto:labs@voxbone.com) for details.
 
 ## Questions
 
-Please contact us at [workshop@voxbone.com](mailto:workshop@voxbone.com), submit an issue, or visit [voxbone.com](https://www.voxbone.com).
+Please contact us at [labs@voxbone.com](mailto:labs@voxbone.com), submit an issue, or visit [voxbone.com](https://www.voxbone.com).
 
 # File references
 Voxbone hosts minified and unminified versions of voxbone.js on our CDN:
 
-* use [//cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.3.min.js) to access a specific patch release
-* use [//cdn.voxbone.com/voxbone/voxbone-2.2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.2.min.js) to access a minor version release with the latest patches
-* use [//cdn.voxbone.com/voxbone/voxbone-2.min.js](https://cdn.voxbone.com/voxbone/voxbone-2.min.js) to access a major version release with the latest updates
+* use [//cdn.voxbone.com/voxbone/voxbone-4.0.0.min.js](https://cdn.voxbone.com/voxbone/voxbone-4.0.0.min.js) to access a specific patch release
+* use [//cdn.voxbone.com/voxbone/voxbone-4.0.min.js](https://cdn.voxbone.com/voxbone/voxbone-4.0.min.js) to access a minor version release with the latest patches
+* use [//cdn.voxbone.com/voxbone/voxbone-4.min.js](https://cdn.voxbone.com/voxbone/voxbone-4.min.js) to access a major version release with the latest updates
 
 Source maps are included with the minified files for simplified debugging. Remove the _min_ from the file names above for the unminified versions.
 
